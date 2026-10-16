@@ -226,6 +226,7 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                     onWinner = { matchNumber, winnerId -> vm.recordWinner(activeTournament.id, matchNumber, winnerId) },
                     onAdvance = { vm.advanceWithoutMatch(activeTournament.id, it) },
                     onSwapEntrants = { first, second, confirmed -> vm.swapOpeningEntrants(activeTournament.id, first, second, confirmed) },
+                    onWithdrawPlayer = { playerId -> vm.withdrawPlayer(activeTournament.id, playerId) },
                     onFinish = { vm.finishTournament(activeTournament.id) },
                     onExport = {
                         val tournamentLines = buildTournamentPdf(activeTournament, selectedParticipants, selectedMatches, points.filter { it.tournamentId == activeTournament.id })
@@ -529,7 +530,7 @@ private fun TournamentsScreen(
         if (tournaments.isEmpty()) EmptyState("Zatím žádný turnaj", "Vytvoř turnaj a vyber hráče z knihovny.")
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
             items(tournaments, key = { it.id }) { tournament ->
-                val count = participants.count { it.tournamentId == tournament.id }
+                val count = participants.count { it.tournamentId == tournament.id && !it.isQueued && !it.isWithdrawn }
                 val all = matches.filter { it.tournamentId == tournament.id }
                 val played = all.count { it.winnerId != null }
                 val winnerName = tournament.winnerId?.let { id -> allPlayers.firstOrNull { it.id == id }?.name ?: participants.firstOrNull { it.tournamentId == tournament.id && it.playerId == id }?.playerNameSnapshot }
@@ -646,10 +647,12 @@ private fun TournamentDetailScreen(
     playerName: (Long) -> String, playerElo: (Long) -> Int, points: List<PointTransactionEntity>,
     onBack: () -> Unit, onAddExistingPlayer: (Long) -> Unit, onAddNewPlayer: (String) -> Unit, onPromoteNext: () -> Unit,
     onStartMatch: (Int) -> Unit, onWinner: (Int, Long) -> Unit, onAdvance: (Int) -> Unit,
-    onSwapEntrants: (Long, Long, Boolean) -> Unit, onFinish: () -> Unit, onExport: () -> Unit
+    onSwapEntrants: (Long, Long, Boolean) -> Unit, onWithdrawPlayer: (Long) -> Unit,
+    onFinish: () -> Unit, onExport: () -> Unit
 ) {
     var matchToEdit by remember { mutableStateOf<MatchEntity?>(null) }
     var matchToSwap by remember { mutableStateOf<MatchEntity?>(null) }
+    var participantToWithdraw by remember { mutableStateOf<Long?>(null) }
     var showFinishConfirm by remember { mutableStateOf(false) }
     var showWaitlistDialog by remember { mutableStateOf(false) }
     val completed = matches.count { it.winnerId != null }
@@ -662,7 +665,8 @@ private fun TournamentDetailScreen(
         }
         Text(tournament.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         val queued = participants.filter { it.isQueued }.sortedBy { it.seed }
-        val activeParticipants = participants.filterNot { it.isQueued }
+        val activeParticipants = participants.filterNot { it.isQueued || it.isWithdrawn }.sortedBy { it.seed }
+        val withdrawnParticipants = participants.filter { it.isWithdrawn }.sortedBy { it.seed }
         Text("${tournament.dateIso} · ${activeParticipants.size} hráčů" + if (queued.isNotEmpty()) " · ${queued.size} čeká" else "", color = MaterialTheme.colorScheme.secondary)
         if (tournament.note.isNotBlank()) Text(tournament.note, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (tournament.status == TournamentEntity.STATUS_ACTIVE) {
@@ -672,11 +676,15 @@ private fun TournamentDetailScreen(
         }
         if (queued.isNotEmpty()) {
             val openingMatches = matches.filter { it.branch == "WINNERS" && it.roundNumber == 1 }
-            val nextOpening = openingMatches.firstOrNull { it.matchKey == "W1_${activeParticipants.size / 2}" }
-            val canPromote = tournament.status == TournamentEntity.STATUS_ACTIVE &&
-                openingMatches.isNotEmpty() && activeParticipants.size < openingMatches.size * 2 &&
-                nextOpening != null && nextOpening.winnerId == null && nextOpening.selectedWinnerId == null &&
-                !nextOpening.byeConfirmed && nextOpening.status != "IN_PROGRESS"
+            val occupiedSeeds = activeParticipants.map { it.seed }.toSet()
+            val promotionSeed = (1..(openingMatches.size * 2)).firstOrNull { seed ->
+                if (seed in occupiedSeeds) return@firstOrNull false
+                val target = openingMatches.firstOrNull { it.matchKey == "W1_${(seed - 1) / 2}" } ?: return@firstOrNull false
+                val slotPlayer = if ((seed - 1) % 2 == 0) target.player1Id else target.player2Id
+                slotPlayer == null && target.winnerId == null && target.selectedWinnerId == null &&
+                    !target.byeConfirmed && target.status != "IN_PROGRESS"
+            }
+            val canPromote = tournament.status == TournamentEntity.STATUS_ACTIVE && promotionSeed != null
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("ČEKACÍ FRONTA", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
@@ -701,7 +709,25 @@ private fun TournamentDetailScreen(
             StatTile("Body", points.sumOf { it.points }.toString(), Modifier.weight(1f))
         }
         Text("ÚČASTNÍCI", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
-        Text(activeParticipants.joinToString("  ·  ") { it.playerNameSnapshot }, style = MaterialTheme.typography.bodySmall)
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            activeParticipants.forEach { participant ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${participant.seed}. ${participant.playerNameSnapshot}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    if (tournament.status == TournamentEntity.STATUS_ACTIVE) {
+                        TextButton(onClick = { participantToWithdraw = participant.playerId }) {
+                            Text("Odstoupit", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+            if (withdrawnParticipants.isNotEmpty()) {
+                Text(
+                    "Odstoupili: " + withdrawnParticipants.joinToString(" · ") { it.playerNameSnapshot },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
         Divider(color = Color(0xFF393142))
         Text("BRACKET", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         val bracketCapacity = matches.count { it.branch == "WINNERS" && it.roundNumber == 1 } * 2
@@ -778,13 +804,23 @@ private fun TournamentDetailScreen(
     matchToSwap?.let { match ->
         ManualSwapDialog(
             match = match,
-            participants = participants.filterNot { it.isQueued }.sortedBy { it.seed },
+            participants = participants.filterNot { it.isQueued || it.isWithdrawn }.sortedBy { it.seed },
             playerName = playerName,
             onDismiss = { matchToSwap = null },
             onConfirmSwap = { firstId, secondId ->
                 onSwapEntrants(firstId, secondId, true)
                 matchToSwap = null
             }
+        )
+    }
+    participantToWithdraw?.let { playerId ->
+        val participant = participants.firstOrNull { it.playerId == playerId }
+        ConfirmDialog(
+            title = "Odstoupit z turnaje?",
+            text = "Hráč ${participant?.playerNameSnapshot ?: playerName(playerId)} přestane postupovat do dalších zápasů. Již odehrané výsledky zůstanou v historii; neodehraná místa zůstanou volná.",
+            confirm = "Potvrdit odstoupení",
+            onDismiss = { participantToWithdraw = null },
+            onConfirm = { onWithdrawPlayer(playerId); participantToWithdraw = null }
         )
     }
     if (showFinishConfirm) {
@@ -852,7 +888,7 @@ private fun MatchResultDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(columnTitle(match.branch, match.roundNumber), color = MaterialTheme.colorScheme.secondary)
-                if (isFinished) Text("Historický turnaj: oprava změní uložené statistiky a body.", color = MaterialTheme.colorScheme.error)
+                if (isFinished) Text("Historický turnaj: oprava změní uložené statistiky, body a ELO.", color = MaterialTheme.colorScheme.error)
                 if (match.player1Id == null && match.player2Id == null) {
                     Text("Tato pozice zatím nemá přiřazené hráče.")
                 } else if (one != null) {

@@ -103,6 +103,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.swapOpeningEntrants(tournamentId, firstPlayerId, secondPlayerId, confirmed)
         }
 
+    fun withdrawPlayer(tournamentId: Long, playerId: Long) =
+        perform("Hráč odstoupil; odehrané výsledky zůstaly zachovány.") {
+            repository.withdrawPlayer(tournamentId, playerId)
+        }
+
     fun startMatch(tournamentId: Long, matchNumber: Int) = perform("Zápas byl označen jako rozehraný.") {
         repository.setMatchInProgress(tournamentId, matchNumber)
     }

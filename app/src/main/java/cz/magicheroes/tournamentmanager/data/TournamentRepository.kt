@@ -182,9 +182,7 @@ class TournamentRepository(private val database: AppDatabase) {
             val active = participants.filterNot { it.isQueued || it.isWithdrawn }.sortedBy { it.seed }
             val first = active.firstOrNull { it.playerId == firstPlayerId } ?: error("První hráč není aktivním účastníkem turnaje.")
             val second = active.firstOrNull { it.playerId == secondPlayerId } ?: error("Druhý hráč není aktivním účastníkem turnaje.")
-            val firstIndex = active.indexOf(first)
-            val secondIndex = active.indexOf(second)
-            require(firstIndex / 2 != secondIndex / 2) {
+            require((first.seed - 1) / 2 != (second.seed - 1) / 2) {
                 "Vybraní hráči už jsou ve stejné úvodní dvojici. Vyber hráče z jiného zápasu."
             }
             val hasActivity = dao.getMatches(tournamentId).any {
