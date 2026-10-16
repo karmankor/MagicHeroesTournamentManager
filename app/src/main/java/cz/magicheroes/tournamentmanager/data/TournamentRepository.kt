@@ -57,6 +57,22 @@ class TournamentRepository(private val database: AppDatabase) {
         dao.updateClan(old.copy(name = clean))
     }
 
+    suspend fun adjustClanPoints(clanId: Long, delta: Int, reason: String) = database.withTransaction {
+        require(delta != 0) { "Změna bodů nesmí být nula." }
+        require(kotlin.math.abs(delta.toLong()) <= 1_000_000L) { "Jedna úprava může být nejvýše 1 000 000 bodů." }
+        val clan = dao.getClan(clanId) ?: error("Klan už neexistuje.")
+        val cleanReason = reason.trim().ifBlank { "Ruční úprava bodů" }
+        require(cleanReason.length <= 120) { "Důvod může mít nejvýše 120 znaků." }
+        dao.insertClanPointAdjustment(
+            ClanPointAdjustmentEntity(
+                clanIdSnapshot = clan.id,
+                clanNameSnapshot = clan.name,
+                points = delta,
+                reason = cleanReason
+            )
+        )
+    }
+
     suspend fun deleteClan(id: Long) = database.withTransaction {
         // Current players become clanless; historic participant and score snapshots remain intact.
         dao.removePlayersFromClan(id)
@@ -200,6 +216,69 @@ class TournamentRepository(private val database: AppDatabase) {
             rebuildPoints(tournamentId)
             rebuildEloRatings()
         }
+
+    suspend fun setManualMatchSlot(tournamentId: Long, matchNumber: Int, slot: Int, playerId: Long?, locked: Boolean) = database.withTransaction {
+        require(slot in 0..1) { "Vyber první nebo druhou pozici." }
+        val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
+        require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Ruční pozice lze měnit jen v aktivním turnaji." }
+        val matches = dao.getMatches(tournamentId)
+        val target = matches.firstOrNull { it.matchNumber == matchNumber } ?: error("Zápas neexistuje.")
+        require(target.winnerId == null && target.selectedWinnerId == null && target.status != "IN_PROGRESS") {
+            "Obsazení lze měnit jen v neodehraném a nerozehraném zápase."
+        }
+        if (playerId != null) {
+            val participant = dao.getParticipants(tournamentId).firstOrNull { it.playerId == playerId }
+                ?: error("Vybraný hráč není účastníkem turnaje.")
+            require(!participant.isWithdrawn) { "Odstoupivšího hráče nelze znovu umístit." }
+            require(matches.none { it.status == "IN_PROGRESS" && (it.player1Id == playerId || it.player2Id == playerId) }) {
+                "Hráč právě hraje rozehraný zápas. Nejprve ho dokonči."
+            }
+            val currentSlotId = if (slot == 0) target.player1Id else target.player2Id
+            if (target.branch == "WINNERS" && target.roundNumber == 1 &&
+                currentSlotId != null && currentSlotId != playerId
+            ) {
+                error("Obsazenou úvodní pozici nelze přepsat. Použij ruční úpravu úvodních dvojic nebo vyber volné pole.")
+            }
+            require((if (slot == 0) target.player2Id else target.player1Id) != playerId) {
+                "Stejný hráč nemůže být v jednom zápase v obou pozicích."
+            }
+            if (participant.isQueued) dao.updateParticipant(participant.copy(isQueued = false, isWithdrawn = false))
+        }
+
+        // Keep manual pins on finished matches for history; clear a pending pin if the same
+        // player is being moved to a different currently unplayed match.
+        if (playerId != null) {
+            matches.filter { it.matchNumber != matchNumber && it.selectedWinnerId == null && it.winnerId == null }.forEach { old ->
+                var updatedMatch = old
+                if (old.manualPlayer1Locked && old.manualPlayer1Id == playerId) {
+                    updatedMatch = updatedMatch.copy(manualPlayer1Locked = false, manualPlayer1Id = null, manualPlayer1AssignedAt = null)
+                }
+                if (old.manualPlayer2Locked && old.manualPlayer2Id == playerId) {
+                    updatedMatch = updatedMatch.copy(manualPlayer2Locked = false, manualPlayer2Id = null, manualPlayer2AssignedAt = null)
+                }
+                if (updatedMatch != old) dao.updateMatch(updatedMatch)
+            }
+        }
+
+        val now = System.currentTimeMillis()
+        val updatedTarget = if (slot == 0) {
+            target.copy(
+                manualPlayer1Locked = locked,
+                manualPlayer1Id = playerId.takeIf { locked },
+                manualPlayer1AssignedAt = now.takeIf { locked }
+            )
+        } else {
+            target.copy(
+                manualPlayer2Locked = locked,
+                manualPlayer2Id = playerId.takeIf { locked },
+                manualPlayer2AssignedAt = now.takeIf { locked }
+            )
+        }
+        dao.updateMatch(updatedTarget)
+        rebuildBracket(tournamentId)
+        rebuildPoints(tournamentId)
+        rebuildEloRatings()
+    }
 
     suspend fun withdrawPlayer(tournamentId: Long, playerId: Long) = database.withTransaction {
         val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
