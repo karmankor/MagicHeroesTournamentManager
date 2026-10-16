@@ -89,6 +89,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.createPlayerInWaitlist(tournamentId, name)
     }
 
+    fun promoteNextWaitlistedPlayer(tournamentId: Long) = perform("Další čekající hráč byl zařazen do volného místa v bracketu.") {
+        repository.promoteNextWaitlistedPlayer(tournamentId)
+    }
+
     fun startMatch(tournamentId: Long, matchNumber: Int) = perform("Zápas byl označen jako rozehraný.") {
         repository.setMatchInProgress(tournamentId, matchNumber)
     }
