@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cz.magicheroes.tournamentmanager.data.ClanEntity
+import cz.magicheroes.tournamentmanager.data.ClanPointAdjustmentEntity
 import cz.magicheroes.tournamentmanager.data.MatchEntity
 import cz.magicheroes.tournamentmanager.data.PlayerEntity
 import cz.magicheroes.tournamentmanager.data.PointTransactionEntity
@@ -134,6 +135,7 @@ private fun MagicHeroesApp(vm: MainViewModel) {
     val allMatches by vm.allMatches.collectAsState()
     val allParticipants by vm.allParticipants.collectAsState()
     val points by vm.points.collectAsState()
+    val clanPointAdjustments by vm.clanPointAdjustments.collectAsState()
     val selectedMatches by vm.selectedMatches.collectAsState()
     val selectedParticipants by vm.selectedParticipants.collectAsState()
     val message by vm.message.collectAsState()
@@ -144,6 +146,7 @@ private fun MagicHeroesApp(vm: MainViewModel) {
     var showAddPlayer by remember { mutableStateOf(false) }
     var showAddClan by remember { mutableStateOf(false) }
     var editClan by remember { mutableStateOf<ClanEntity?>(null) }
+    var adjustClanPointsFor by remember { mutableStateOf<ClanEntity?>(null) }
     var deletePlayerConfirm by remember { mutableStateOf<PlayerEntity?>(null) }
     var deleteClanConfirm by remember { mutableStateOf<ClanEntity?>(null) }
     var showCreateTournament by remember { mutableStateOf(false) }
@@ -261,9 +264,11 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                         players = players,
                         stats = stats,
                         points = points,
+                        adjustments = clanPointAdjustments,
                         onAdd = { showAddClan = true },
                         onOpen = { selectedClanProfile = it.id },
                         onEdit = { editClan = it },
+                        onAdjustPoints = { adjustClanPointsFor = it },
                         onDelete = { deleteClanConfirm = it }
                     )
                     Page.TOURNAMENTS -> TournamentsScreen(
@@ -279,10 +284,11 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                         stats = stats,
                         clans = clans,
                         points = points,
+                        clanAdjustments = clanPointAdjustments,
                         matches = allMatches,
                         onProfile = { selectedPlayerProfile = it.id },
                         onExportPlayers = { startPdf(PdfRequest("magic-heroes-zebricek-hracu.pdf", "Magic Heroes — žebříček hráčů", buildLeaderboardPdf(stats, clanMap))) },
-                        onExportClans = { startPdf(PdfRequest("magic-heroes-zebricek-klanu.pdf", "Magic Heroes — žebříček klanů", buildClanLeaderboardPdf(clans, players, points, stats))) }
+                        onExportClans = { startPdf(PdfRequest("magic-heroes-zebricek-klanu.pdf", "Magic Heroes — žebříček klanů", buildClanLeaderboardPdf(clans, players, points, clanPointAdjustments, stats))) }
                     )
                     Page.HISTORY -> HistoryScreen(
                         tournaments = tournaments.filter { it.status == TournamentEntity.STATUS_FINISHED },
@@ -368,8 +374,19 @@ private fun MagicHeroesApp(vm: MainViewModel) {
     selectedClanProfile?.let { id ->
         clans.firstOrNull { it.id == id }?.let { clan -> ClanProfileDialog(
             clan = clan, players = players.filter { it.clanId == id }, stats = stats,
-            points = points, onDismiss = { selectedClanProfile = null }
+            points = points, adjustments = clanPointAdjustments, onDismiss = { selectedClanProfile = null }
         ) }
+    }
+
+    adjustClanPointsFor?.let { clan ->
+        ClanPointsDialog(
+            clan = clan,
+            onDismiss = { adjustClanPointsFor = null },
+            onSubmit = { delta, reason ->
+                vm.adjustClanPoints(clan.id, delta, reason)
+                adjustClanPointsFor = null
+            }
+        )
     }
 
     message?.let { text ->
@@ -485,7 +502,9 @@ private fun PlayersScreen(
 @Composable
 private fun ClansScreen(
     clans: List<ClanEntity>, players: List<PlayerEntity>, stats: List<PlayerStats>, points: List<PointTransactionEntity>,
-    onAdd: () -> Unit, onOpen: (ClanEntity) -> Unit, onEdit: (ClanEntity) -> Unit, onDelete: (ClanEntity) -> Unit
+    adjustments: List<ClanPointAdjustmentEntity>,
+    onAdd: () -> Unit, onOpen: (ClanEntity) -> Unit, onEdit: (ClanEntity) -> Unit,
+    onAdjustPoints: (ClanEntity) -> Unit, onDelete: (ClanEntity) -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -496,7 +515,8 @@ private fun ClansScreen(
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
             items(clans, key = { it.id }) { clan ->
                 val members = players.filter { it.clanId == clan.id }
-                val clanPoints = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
+                val clanPoints = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points } +
+                    adjustments.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, Color(0xFF393142))) {
                     Column(Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -508,6 +528,7 @@ private fun ClansScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             TextButton(onClick = { onOpen(clan) }) { Text("Detail") }
                             TextButton(onClick = { onEdit(clan) }) { Text("Přejmenovat") }
+                            TextButton(onClick = { onAdjustPoints(clan) }) { Text("Upravit body") }
                             TextButton(onClick = { onDelete(clan) }) { Text("Odstranit", color = MaterialTheme.colorScheme.error) }
                         }
                     }
@@ -572,7 +593,8 @@ private fun HistoryScreen(
 
 @Composable
 private fun LeaderboardScreen(
-    stats: List<PlayerStats>, clans: List<ClanEntity>, points: List<PointTransactionEntity>, matches: List<MatchEntity>,
+    stats: List<PlayerStats>, clans: List<ClanEntity>, points: List<PointTransactionEntity>,
+    clanAdjustments: List<ClanPointAdjustmentEntity>, matches: List<MatchEntity>,
     onProfile: (PlayerEntity) -> Unit, onExportPlayers: () -> Unit, onExportClans: () -> Unit
 ) {
     var mode by remember { mutableStateOf(false) }
@@ -619,7 +641,8 @@ private fun LeaderboardScreen(
             OutlinedButton(onClick = onExportPlayers, modifier = Modifier.fillMaxWidth()) { Text("Export žebříčku hráčů do PDF") }
         } else {
             val clanRanking = clans.map { clan ->
-                val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
+                val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points } +
+                    clanAdjustments.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
                 val members = stats.filter { it.player.clanId == clan.id }
                 Triple(clan, score, members)
             }.sortedByDescending { it.second }
@@ -1195,19 +1218,31 @@ private fun PlayerProfileDialog(
 }
 
 @Composable
-private fun ClanProfileDialog(clan: ClanEntity, players: List<PlayerEntity>, stats: List<PlayerStats>, points: List<PointTransactionEntity>, onDismiss: () -> Unit) {
+private fun ClanProfileDialog(
+    clan: ClanEntity, players: List<PlayerEntity>, stats: List<PlayerStats>, points: List<PointTransactionEntity>,
+    adjustments: List<ClanPointAdjustmentEntity>, onDismiss: () -> Unit
+) {
     val members = stats.filter { it.player.clanId == clan.id }
     val wins = members.sumOf { it.wins }
     val losses = members.sumOf { it.losses }
-    val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
+    val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points } +
+        adjustments.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(clan.name, fontWeight = FontWeight.Bold) },
         text = {
             Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("${players.size} aktuálních členů")
-                Text("Historické body klanu: $score", color = MaterialTheme.colorScheme.secondary)
+                Text("Body klanu: $score", color = MaterialTheme.colorScheme.secondary)
                 Text("Výhry současných členů: $wins · prohry: $losses")
+                val manualAdjustments = adjustments.filter { it.clanIdSnapshot == clan.id }.sortedByDescending { it.createdAt }
+                if (manualAdjustments.isNotEmpty()) {
+                    Divider()
+                    Text("Ruční úpravy bodů", fontWeight = FontWeight.SemiBold)
+                    manualAdjustments.take(10).forEach { entry ->
+                        Text("${if (entry.points > 0) "+" else ""}${entry.points} b. · ${entry.reason}", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
                 Divider()
                 players.forEach { Text("• ${it.name}") }
             }
@@ -1332,11 +1367,15 @@ private fun buildLeaderboardPdf(stats: List<PlayerStats>, clans: Map<Long, ClanE
     }
 }
 
-private fun buildClanLeaderboardPdf(clans: List<ClanEntity>, players: List<PlayerEntity>, points: List<PointTransactionEntity>, stats: List<PlayerStats>): List<String> = buildList {
+private fun buildClanLeaderboardPdf(
+    clans: List<ClanEntity>, players: List<PlayerEntity>, points: List<PointTransactionEntity>,
+    adjustments: List<ClanPointAdjustmentEntity>, stats: List<PlayerStats>
+): List<String> = buildList {
     add("Pozice | Klan | Body z historických výsledků | Aktivní členové | Výhry členů | Prohry členů")
     clans.map { clan ->
         val memberStats = stats.filter { it.player.clanId == clan.id }
-        val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
+        val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points } +
+            adjustments.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
         Triple(clan, score, memberStats)
     }.sortedByDescending { it.second }.forEachIndexed { index, row ->
         add("${index + 1}. | ${row.first.name} | ${row.second} | ${players.count { it.clanId == row.first.id }} | ${row.third.sumOf { it.wins }} | ${row.third.sumOf { it.losses }}")
