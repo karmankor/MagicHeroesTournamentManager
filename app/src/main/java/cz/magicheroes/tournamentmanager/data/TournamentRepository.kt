@@ -588,6 +588,22 @@ class TournamentRepository(private val database: AppDatabase) {
     ): Int? {
         if (source.isTournamentFinal) return null
 
+        // Winners always advance to their designated next round. Never divert a winner
+        // into an arbitrary open slot just because the normal next-round seat is unavailable.
+        if (!isLoser) {
+            val targetNumber = source.nextWinnerMatchNumber
+            val targetSlot = source.winnerTargetSlot
+            if (targetNumber != null && targetSlot != null &&
+                assignPlayerToSlot(
+                    map, targetNumber, targetSlot, playerId,
+                    participantName(map, previousByNumber, playerId), false
+                )
+            ) return targetNumber
+            return null
+        }
+
+        // Manual placements can override a loser's automatic destination, but never skip a
+        // winner's required next round.
         val manual = latestManualByPlayer[playerId]
         if (manual != null && manual.matchNumber != source.matchNumber) {
             val target = map[manual.matchNumber]
@@ -602,20 +618,6 @@ class TournamentRepository(private val database: AppDatabase) {
         // Do not reuse an old dynamic destination merely because this player appeared there
         // before. Replaying the current outcome decides the new route; a changed entrant then
         // invalidates downstream results rather than preserving a now-impossible progression.
-
-        // Winners always advance to their designated next round. Never divert a winner
-        // into an arbitrary open slot just because the normal next-round seat is unavailable.
-        if (!isLoser) {
-            val targetNumber = source.nextWinnerMatchNumber
-            val targetSlot = source.winnerTargetSlot
-            if (targetNumber != null && targetSlot != null &&
-                assignPlayerToSlot(
-                    map, targetNumber, targetSlot, playerId,
-                    participantName(map, previousByNumber, playerId), false
-                )
-            ) return targetNumber
-            return null
-        }
 
         if (source.branch == "WINNERS") {
             // A loser gets one chance to stay in the winners branch: only a vacant seat
