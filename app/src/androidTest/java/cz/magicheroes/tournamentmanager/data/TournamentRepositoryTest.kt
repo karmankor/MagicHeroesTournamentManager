@@ -83,7 +83,10 @@ class TournamentRepositoryTest {
         val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
         assertEquals(14, matches.size)
         assertEquals(ids[0], matches.getValue("W1_0").winnerId)
-        assertEquals(ids[2], matches.getValue("W1_1").player1Id)
+        // The defeated player stays in the nearest free winner-branch seat; the waitlisted
+        // entrant fills the opponent's side of that now-active match.
+        assertEquals(ids[1], matches.getValue("W1_1").player1Id)
+        assertEquals(ids[2], matches.getValue("W1_1").player2Id)
     }
 
     @Test
