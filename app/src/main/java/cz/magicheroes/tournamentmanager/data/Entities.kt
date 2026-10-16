@@ -49,7 +49,8 @@ data class TournamentParticipantEntity(
     val playerNameSnapshot: String,
     val clanIdSnapshot: Long? = null,
     val clanNameSnapshot: String? = null,
-    val seed: Int
+    val seed: Int,
+    val isQueued: Boolean = false
 )
 
 @Entity(
