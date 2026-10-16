@@ -902,13 +902,15 @@ private fun MatchCard(match: MatchEntity, playerName: (Long) -> String, playerEl
             Divider(color = Color(0xFF494151))
             Text(match.player2Id?.let { "${playerName(it)} · ELO ${playerElo(it)}" } ?: "Čeká na soupeře", maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (match.winnerId != null) Text("Vítěz: ${playerName(match.winnerId)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
-            if (match.nextWinnerMatchNumber != null) {
-                Text("↗ Vítěz → zápas ${match.nextWinnerMatchNumber}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val winnerDestination = if (match.winnerId != null) match.routedWinnerMatchNumber else match.nextWinnerMatchNumber
+            val loserDestination = if (match.winnerId != null) match.routedLoserMatchNumber else match.nextLoserMatchNumber
+            if (winnerDestination != null) {
+                Text("↗ Vítěz → zápas " + winnerDestination, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (match.nextLoserMatchNumber != null) {
-                Text("↘ Poražený → zápas ${match.nextLoserMatchNumber}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else if (match.branch == "LOSERS" && match.winnerId != null) {
-                Text("Poražený: vyřazen", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            if (loserDestination != null) {
+                Text("↘ Poražený → zápas " + loserDestination, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (match.winnerId != null && match.branch != "FINAL" && match.loserId != null) {
+                Text("Poražený: není volné místo", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
         }
     }
