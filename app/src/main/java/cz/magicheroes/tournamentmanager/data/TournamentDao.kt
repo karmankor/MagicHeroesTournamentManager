@@ -81,6 +81,9 @@ interface TournamentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun restoreTournaments(items: List<TournamentEntity>)
 
+    @Query("DELETE FROM tournaments WHERE id = :tournamentId")
+    suspend fun deleteTournament(tournamentId: Long)
+
     @Query("DELETE FROM tournaments")
     suspend fun clearTournaments()
 
@@ -111,6 +114,9 @@ interface TournamentDao {
     @Update
     suspend fun updateParticipant(item: TournamentParticipantEntity)
 
+    @Query("DELETE FROM tournament_participants WHERE tournamentId = :tournamentId")
+    suspend fun deleteTournamentParticipants(tournamentId: Long)
+
     @Query("DELETE FROM tournament_participants")
     suspend fun clearParticipants()
 
@@ -134,6 +140,9 @@ interface TournamentDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun restoreMatches(items: List<MatchEntity>)
+
+    @Query("DELETE FROM matches WHERE tournamentId = :tournamentId")
+    suspend fun deleteTournamentMatches(tournamentId: Long)
 
     @Query("DELETE FROM matches")
     suspend fun clearMatches()

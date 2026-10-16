@@ -397,6 +397,20 @@ class TournamentRepository(private val database: AppDatabase) {
         )
     }
 
+    /** Permanently removes one non-active tournament and all data owned by it. */
+    suspend fun deleteTournament(tournamentId: Long) = database.withTransaction {
+        val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
+        require(tournament.status != TournamentEntity.STATUS_ACTIVE) {
+            "Aktivní turnaj nelze smazat. Nejprve ho ukonči."
+        }
+        dao.deleteTournamentPoints(tournamentId)
+        dao.deleteTournamentMatches(tournamentId)
+        dao.deleteTournamentParticipants(tournamentId)
+        dao.deleteTournament(tournamentId)
+        // ELO is derived from match history, so recalculate it after removing these matches.
+        rebuildEloRatings()
+    }
+
     private data class ManualPlacement(
         val matchNumber: Int,
         val slot: Int,
@@ -619,19 +633,16 @@ class TournamentRepository(private val database: AppDatabase) {
         // before. Replaying the current outcome decides the new route; a changed entrant then
         // invalidates downstream results rather than preserving a now-impossible progression.
 
-        if (source.branch == "WINNERS") {
-            // A loser gets one chance to stay in the winners branch: only a vacant seat
-            // in the same round. Otherwise, send them to the nearest available losers seat.
-            val sameRoundWinnerSeat = findNearestOpenSlot(
-                map, source, playerId, "WINNERS", previousByNumber, sameRoundOnly = true
-            )
-            if (sameRoundWinnerSeat != null) return sameRoundWinnerSeat
-            return findNearestOpenSlot(map, source, playerId, "LOSERS", previousByNumber)
-        }
-
-        // Losing in the losers branch means elimination unless another losers-branch
-        // seat is available. Never send a loser back into the winners branch.
-        return findNearestOpenSlot(map, source, playerId, "LOSERS", previousByNumber)
+        // Every loser, regardless of the round or branch where they lost, returns
+        // to the opening round: first WINNERS round 1, then LOSERS round 1.
+        // If both opening branches are full, the player is eliminated.
+        val openingWinnerSeat = findNearestOpenSlot(
+            map, source, playerId, "WINNERS", previousByNumber, openingRoundOnly = true
+        )
+        if (openingWinnerSeat != null) return openingWinnerSeat
+        return findNearestOpenSlot(
+            map, source, playerId, "LOSERS", previousByNumber, openingRoundOnly = true
+        )
     }
 
     private fun findNearestOpenSlot(
@@ -640,14 +651,14 @@ class TournamentRepository(private val database: AppDatabase) {
         playerId: Long,
         branch: String,
         previousByNumber: Map<Int, MatchEntity>,
-        sameRoundOnly: Boolean = false
+        openingRoundOnly: Boolean = false
     ): Int? {
         val sourceOpponent = source.winnerId
         val candidates = map.values.asSequence()
             .filter { target ->
                 target.matchNumber != source.matchNumber &&
                     target.branch == branch &&
-                    (!sameRoundOnly || target.roundNumber == source.roundNumber) &&
+                    (!openingRoundOnly || target.roundNumber == 1) &&
                     !target.isTournamentFinal &&
                     target.selectedWinnerId == null &&
                     target.winnerId == null &&

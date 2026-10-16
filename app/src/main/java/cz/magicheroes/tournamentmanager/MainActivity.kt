@@ -149,6 +149,7 @@ private fun MagicHeroesApp(vm: MainViewModel) {
     var adjustClanPointsFor by remember { mutableStateOf<ClanEntity?>(null) }
     var deletePlayerConfirm by remember { mutableStateOf<PlayerEntity?>(null) }
     var deleteClanConfirm by remember { mutableStateOf<ClanEntity?>(null) }
+    var deleteTournamentConfirm by remember { mutableStateOf<TournamentEntity?>(null) }
     var showCreateTournament by remember { mutableStateOf(false) }
     var selectedTournamentId by remember { mutableStateOf<Long?>(null) }
     var selectedPlayerProfile by remember { mutableStateOf<Long?>(null) }
@@ -298,7 +299,8 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                         participants = allParticipants,
                         matches = allMatches,
                         players = allPlayers,
-                        onOpen = { selectedTournamentId = it.id; vm.openTournament(it.id) }
+                        onOpen = { selectedTournamentId = it.id; vm.openTournament(it.id) },
+                        onDelete = { deleteTournamentConfirm = it }
                     )
                 }
             }
@@ -334,6 +336,13 @@ private fun MagicHeroesApp(vm: MainViewModel) {
         confirm = "Archivovat",
         onDismiss = { deletePlayerConfirm = null },
         onConfirm = { vm.archivePlayer(player.id); deletePlayerConfirm = null }
+    ) }
+    deleteTournamentConfirm?.let { tournament -> ConfirmDialog(
+        title = "Smazat turnaj a výsledky?",
+        text = "Opravdu chceš trvale smazat turnaj „${tournament.name}“? Odstraní se jeho zápasy, výsledky a body z tohoto turnaje. Hráči, klany i ostatní turnaje zůstanou zachované. Tuto akci nelze vrátit.",
+        confirm = "Trvale smazat",
+        onDismiss = { deleteTournamentConfirm = null },
+        onConfirm = { vm.deleteTournament(tournament.id); deleteTournamentConfirm = null }
     ) }
     deleteClanConfirm?.let { clan -> ConfirmDialog(
         title = "Odstranit klan?",
@@ -579,7 +588,8 @@ private fun TournamentsScreen(
 
 @Composable
 private fun HistoryScreen(
-    tournaments: List<TournamentEntity>, participants: List<TournamentParticipantEntity>, matches: List<MatchEntity>, players: List<PlayerEntity>, onOpen: (TournamentEntity) -> Unit
+    tournaments: List<TournamentEntity>, participants: List<TournamentParticipantEntity>, matches: List<MatchEntity>, players: List<PlayerEntity>,
+    onOpen: (TournamentEntity) -> Unit, onDelete: (TournamentEntity) -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Historie turnajů", style = MaterialTheme.typography.headlineMedium)
@@ -590,7 +600,12 @@ private fun HistoryScreen(
                 val count = participants.count { it.tournamentId == tournament.id }
                 val played = matches.count { it.tournamentId == tournament.id && it.winnerId != null }
                 val winner = tournament.winnerId?.let { id -> players.firstOrNull { it.id == id }?.name ?: participants.firstOrNull { it.tournamentId == tournament.id && it.playerId == id }?.playerNameSnapshot }
-                HomeAction("${tournament.name} · ${tournament.dateIso}", "$count účastníků · $played dokončených zápasů${winner?.let { " · vítěz: $it" } ?: ""}", { onOpen(tournament) })
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    HomeAction("${tournament.name} · ${tournament.dateIso}", "$count účastníků · $played dokončených zápasů${winner?.let { " · vítěz: $it" } ?: ""}", { onOpen(tournament) })
+                    TextButton(onClick = { onDelete(tournament) }) {
+                        Text("Smazat turnaj a výsledky", color = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
         }
     }

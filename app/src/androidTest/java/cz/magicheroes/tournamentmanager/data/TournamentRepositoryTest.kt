@@ -60,6 +60,25 @@ class TournamentRepositoryTest {
     }
 
     @Test
+    fun deletingFinishedTournamentRemovesOnlyItsHistoryAndRecalculatesElo() = runBlocking {
+        listOf("Ada", "Borek").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Starý turnaj", "2026-10-16", "", ids)
+        repository.recordWinner(tournamentId, 1, ids[0])
+        repository.finishTournament(tournamentId)
+
+        repository.deleteTournament(tournamentId)
+
+        assertEquals(null, database.tournamentDao().getTournament(tournamentId))
+        assertTrue(database.tournamentDao().getMatches(tournamentId).isEmpty())
+        assertTrue(database.tournamentDao().getParticipants(tournamentId).isEmpty())
+        assertTrue(database.tournamentDao().getPointsForTournament(tournamentId).isEmpty())
+        assertEquals(2, database.tournamentDao().getPlayers().size)
+        assertEquals(1000, database.tournamentDao().getPlayer(ids[0])?.eloRating)
+        assertEquals(1000, database.tournamentDao().getPlayer(ids[1])?.eloRating)
+    }
+
+    @Test
     fun archivedPlayerAndHistoricRecordsRemainInDatabase() = runBlocking {
         repository.addPlayer("Člen", null)
         val player = database.tournamentDao().getPlayers().single()
