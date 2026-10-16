@@ -25,6 +25,9 @@ jobs:
       - name: Run unit tests
         run: bash gradlew testDebugUnitTest
 
+      - name: Compile Android instrumented tests
+        run: bash gradlew compileDebugAndroidTestKotlin
+
       - name: Build debug APK
         run: bash gradlew assembleDebug
 
