@@ -82,6 +82,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.Main.immediate) { onCreated(id) }
         }
 
+    fun addPlayerToWaitlist(tournamentId: Long, playerId: Long) = perform("Hráč byl přidán na konec čekací fronty.") {
+        repository.addPlayerToWaitlist(tournamentId, playerId)
+    }
+    fun createPlayerInWaitlist(tournamentId: Long, name: String) = perform("Nový hráč byl vytvořen a přidán na konec čekací fronty.") {
+        repository.createPlayerInWaitlist(tournamentId, name)
+    }
+
     fun startMatch(tournamentId: Long, matchNumber: Int) = perform("Zápas byl označen jako rozehraný.") {
         repository.setMatchInProgress(tournamentId, matchNumber)
     }
