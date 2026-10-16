@@ -146,6 +146,28 @@ class TournamentRepository(private val database: AppDatabase) {
         )))
     }
 
+    suspend fun promoteNextWaitlistedPlayer(tournamentId: Long) = database.withTransaction {
+        val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
+        require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Hráče lze zařadit do bracketu jen během aktivního turnaje." }
+        val participants = dao.getParticipants(tournamentId)
+        val queued = participants.filter { it.isQueued }.minByOrNull { it.seed }
+            ?: error("Čekací fronta je prázdná.")
+        val active = participants.filterNot { it.isQueued }.sortedBy { it.seed }
+        val matches = dao.getMatches(tournamentId)
+        val openingMatches = matches.filter { it.branch == "WINNERS" && it.roundNumber == 1 }
+        require(openingMatches.isNotEmpty() && active.size < openingMatches.size * 2) {
+            "V bracketu teď není volné místo pro dalšího hráče."
+        }
+        val nextMatchKey = "W1_${active.size / 2}"
+        val target = openingMatches.firstOrNull { it.matchKey == nextMatchKey }
+            ?: error("Volné místo v bracketu se nepodařilo najít.")
+        require(target.winnerId == null && target.selectedWinnerId == null && !target.byeConfirmed && target.status != "IN_PROGRESS") {
+            "Další volné místo už bylo odehráno nebo potvrzeno. Výsledky nebudu měnit."
+        }
+        dao.updateParticipant(queued.copy(isQueued = false))
+        rebuildBracket(tournamentId)
+    }
+
     suspend fun setMatchInProgress(tournamentId: Long, matchNumber: Int) = database.withTransaction {
         val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
         require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Tento turnaj už není aktivní." }
