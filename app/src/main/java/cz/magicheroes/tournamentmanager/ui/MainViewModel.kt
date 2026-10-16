@@ -32,6 +32,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val dao = database.tournamentDao()
     private val repository = TournamentRepository(database)
 
+    init {
+        // Backfill ratings for existing profiles from stored match history.
+        viewModelScope.launch(Dispatchers.IO) { repository.recalculateEloRatings() }
+    }
+
     val players: StateFlow<List<PlayerEntity>> = dao.observePlayers()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val allPlayers: StateFlow<List<PlayerEntity>> = dao.observeAllPlayersIncludingArchived()
@@ -92,6 +97,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun promoteNextWaitlistedPlayer(tournamentId: Long) = perform("Další čekající hráč byl zařazen do volného místa v bracketu.") {
         repository.promoteNextWaitlistedPlayer(tournamentId)
     }
+
+    fun swapOpeningEntrants(tournamentId: Long, firstPlayerId: Long, secondPlayerId: Long, confirmed: Boolean) =
+        perform("Úvodní dvojice byly upraveny; platné výsledky, body a ELO byly přepočítány.") {
+            repository.swapOpeningEntrants(tournamentId, firstPlayerId, secondPlayerId, confirmed)
+        }
 
     fun startMatch(tournamentId: Long, matchNumber: Int) = perform("Zápas byl označen jako rozehraný.") {
         repository.setMatchInProgress(tournamentId, matchNumber)

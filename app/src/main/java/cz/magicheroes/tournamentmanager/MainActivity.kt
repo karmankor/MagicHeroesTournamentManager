@@ -216,6 +216,7 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                     participants = selectedParticipants,
                     availablePlayers = players,
                     playerName = { id -> allPlayers.firstOrNull { it.id == id }?.name ?: allParticipants.firstOrNull { it.playerId == id }?.playerNameSnapshot ?: "Neznámý hráč" },
+                    playerElo = { id -> allPlayers.firstOrNull { it.id == id }?.eloRating ?: 1000 },
                     points = points.filter { it.tournamentId == activeTournament.id },
                     onBack = { selectedTournamentId = null; vm.closeTournament() },
                     onAddExistingPlayer = { vm.addPlayerToWaitlist(activeTournament.id, it) },
@@ -224,6 +225,7 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                     onStartMatch = { vm.startMatch(activeTournament.id, it) },
                     onWinner = { matchNumber, winnerId -> vm.recordWinner(activeTournament.id, matchNumber, winnerId) },
                     onAdvance = { vm.advanceWithoutMatch(activeTournament.id, it) },
+                    onSwapEntrants = { first, second, confirmed -> vm.swapOpeningEntrants(activeTournament.id, first, second, confirmed) },
                     onFinish = { vm.finishTournament(activeTournament.id) },
                     onExport = {
                         val tournamentLines = buildTournamentPdf(activeTournament, selectedParticipants, selectedMatches, points.filter { it.tournamentId == activeTournament.id })
@@ -460,7 +462,10 @@ private fun PlayersScreen(
                                 Text(player.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                 Text(clans.firstOrNull { it.id == player.clanId }?.name ?: "Bez klanu", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
                             }
-                            Text("${playerStats?.points ?: 0} b.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("ELO ${player.eloRating}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                                Text("${playerStats?.points ?: 0} b.", style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                         Spacer(Modifier.height(6.dp))
                         Text("${playerStats?.wins ?: 0} V · ${playerStats?.losses ?: 0} P · úspěšnost ${formatPercent(playerStats?.winRate ?: 0.0)} · série W${playerStats?.currentWinStreak ?: 0}/L${playerStats?.currentLossStreak ?: 0}", style = MaterialTheme.typography.bodySmall)
@@ -570,6 +575,7 @@ private fun LeaderboardScreen(
     onProfile: (PlayerEntity) -> Unit, onExportPlayers: () -> Unit, onExportClans: () -> Unit
 ) {
     var mode by remember { mutableStateOf(false) }
+    var eloRanking by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Žebříčky", style = MaterialTheme.typography.headlineMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -577,17 +583,32 @@ private fun LeaderboardScreen(
             if (mode) Button(onClick = { mode = true }) { Text("Klany") } else OutlinedButton(onClick = { mode = true }) { Text("Klany") }
         }
         if (!mode) {
-            Text("Řazení: body → úspěšnost → výhry", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!eloRanking) Button(onClick = { eloRanking = false }) { Text("Žebříček bodů") }
+                else OutlinedButton(onClick = { eloRanking = false }) { Text("Žebříček bodů") }
+                if (eloRanking) Button(onClick = { eloRanking = true }) { Text("Žebříček ELO") }
+                else OutlinedButton(onClick = { eloRanking = true }) { Text("Žebříček ELO") }
+            }
+            val rankedStats = if (eloRanking) {
+                stats.sortedWith(compareByDescending<PlayerStats> { it.player.eloRating }.thenByDescending { it.wins }.thenBy { it.player.name.lowercase(Locale.ROOT) })
+            } else {
+                stats.sortedWith(compareByDescending<PlayerStats> { it.points }.thenByDescending { it.winRate }.thenByDescending { it.wins })
+            }
+            Text(
+                if (eloRanking) "Řazení: ELO → výhry" else "Řazení: body → úspěšnost → výhry",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
-                items(stats.sortedWith(compareByDescending<PlayerStats> { it.points }.thenByDescending { it.winRate }.thenByDescending { it.wins }), key = { it.player.id }) { stat ->
-                    val rank = 1 + stats.count { other -> other.points > stat.points || (other.points == stat.points && other.winRate > stat.winRate) || (other.points == stat.points && other.winRate == stat.winRate && other.wins > stat.wins) }
+                items(rankedStats, key = { it.player.id }) { stat ->
+                    val rank = rankedStats.indexOfFirst { it.player.id == stat.player.id } + 1
                     Card(onClick = { onProfile(stat.player) }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("#$rank", Modifier.width(44.dp), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
                             Column(Modifier.weight(1f)) {
                                 Text(stat.player.name, fontWeight = FontWeight.SemiBold)
                                 Text("${stat.player.clanId?.let { id -> clans.firstOrNull { it.id == id }?.name } ?: "Bez klanu"} · ${stat.wins} V · ${stat.losses} P · ${formatPercent(stat.winRate)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text("W${stat.currentWinStreak} / L${stat.currentLossStreak} · max W${stat.longestWinStreak}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                                Text("ELO ${stat.player.eloRating} · W${stat.currentWinStreak} / L${stat.currentLossStreak} · max W${stat.longestWinStreak}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                             }
                             Text("${stat.points} b.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
                         }
@@ -621,11 +642,14 @@ private fun LeaderboardScreen(
 
 @Composable
 private fun TournamentDetailScreen(
-    tournament: TournamentEntity, matches: List<MatchEntity>, participants: List<TournamentParticipantEntity>, availablePlayers: List<PlayerEntity>, playerName: (Long) -> String,
-    points: List<PointTransactionEntity>, onBack: () -> Unit, onAddExistingPlayer: (Long) -> Unit, onAddNewPlayer: (String) -> Unit, onPromoteNext: () -> Unit,
-    onStartMatch: (Int) -> Unit, onWinner: (Int, Long) -> Unit, onAdvance: (Int) -> Unit, onFinish: () -> Unit, onExport: () -> Unit
+    tournament: TournamentEntity, matches: List<MatchEntity>, participants: List<TournamentParticipantEntity>, availablePlayers: List<PlayerEntity>,
+    playerName: (Long) -> String, playerElo: (Long) -> Int, points: List<PointTransactionEntity>,
+    onBack: () -> Unit, onAddExistingPlayer: (Long) -> Unit, onAddNewPlayer: (String) -> Unit, onPromoteNext: () -> Unit,
+    onStartMatch: (Int) -> Unit, onWinner: (Int, Long) -> Unit, onAdvance: (Int) -> Unit,
+    onSwapEntrants: (Long, Long, Boolean) -> Unit, onFinish: () -> Unit, onExport: () -> Unit
 ) {
     var matchToEdit by remember { mutableStateOf<MatchEntity?>(null) }
+    var matchToSwap by remember { mutableStateOf<MatchEntity?>(null) }
     var showFinishConfirm by remember { mutableStateOf(false) }
     var showWaitlistDialog by remember { mutableStateOf(false) }
     val completed = matches.count { it.winnerId != null }
@@ -698,7 +722,7 @@ private fun TournamentDetailScreen(
                                 else -> playerName(id)
                             }
                         }
-                        MatchCard(match, nameFromThisMatch) { matchToEdit = match }
+                        MatchCard(match, nameFromThisMatch, playerElo) { matchToEdit = match }
                     }
                 }
             }
@@ -743,8 +767,22 @@ private fun TournamentDetailScreen(
         onDismiss = { matchToEdit = null },
         onStart = { onStartMatch(match.matchNumber); matchToEdit = null },
         onConfirmWinner = { winnerId -> onWinner(match.matchNumber, winnerId); matchToEdit = null },
-        onAdvance = { onAdvance(match.matchNumber); matchToEdit = null }
+        onAdvance = { onAdvance(match.matchNumber); matchToEdit = null },
+        canEditPairing = match.branch == "WINNERS" && match.roundNumber == 1 && match.player1Id != null && match.player2Id != null,
+        onEditPairing = { matchToEdit = null; matchToSwap = match }
     )
+    }
+    matchToSwap?.let { match ->
+        ManualSwapDialog(
+            match = match,
+            participants = participants.filterNot { it.isQueued }.sortedBy { it.seed },
+            playerName = playerName,
+            onDismiss = { matchToSwap = null },
+            onConfirmSwap = { firstId, secondId ->
+                onSwapEntrants(firstId, secondId, true)
+                matchToSwap = null
+            }
+        )
     }
     if (showFinishConfirm) {
         val incomplete = matches.count { it.winnerId == null }
@@ -765,7 +803,7 @@ private fun TournamentDetailScreen(
 }
 
 @Composable
-private fun MatchCard(match: MatchEntity, playerName: (Long) -> String, onClick: () -> Unit) {
+private fun MatchCard(match: MatchEntity, playerName: (Long) -> String, playerElo: (Long) -> Int, onClick: () -> Unit) {
     val statusText = when (match.status) {
         "COMPLETED" -> "DOKONČENO"
         "READY" -> "PŘIPRAVEN"
@@ -780,9 +818,9 @@ private fun MatchCard(match: MatchEntity, playerName: (Long) -> String, onClick:
                 Spacer(Modifier.weight(1f))
                 Text(statusText, style = MaterialTheme.typography.labelSmall, color = if (match.status == "COMPLETED") Color(0xFF9CD5A8) else MaterialTheme.colorScheme.secondary)
             }
-            Text(match.player1Id?.let(playerName) ?: "Volná pozice", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(match.player1Id?.let { "${playerName(it)} · ELO ${playerElo(it)}" } ?: "Volná pozice", maxLines = 1, overflow = TextOverflow.Ellipsis)
             Divider(color = Color(0xFF494151))
-            Text(match.player2Id?.let(playerName) ?: "Čeká na soupeře", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(match.player2Id?.let { "${playerName(it)} · ELO ${playerElo(it)}" } ?: "Čeká na soupeře", maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (match.winnerId != null) Text("Vítěz: ${playerName(match.winnerId)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
             if (match.nextWinnerMatchNumber != null) {
                 Text("↗ Vítěz → zápas ${match.nextWinnerMatchNumber}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -799,7 +837,8 @@ private fun MatchCard(match: MatchEntity, playerName: (Long) -> String, onClick:
 @Composable
 private fun MatchResultDialog(
     match: MatchEntity, playerName: (Long) -> String, isFinished: Boolean, onDismiss: () -> Unit, onStart: () -> Unit,
-    onConfirmWinner: (Long) -> Unit, onAdvance: () -> Unit
+    onConfirmWinner: (Long) -> Unit, onAdvance: () -> Unit,
+    canEditPairing: Boolean, onEditPairing: () -> Unit
 ) {
     var chosenWinner by remember(match.id, match.winnerId) { mutableStateOf(match.winnerId) }
     var confirmAdvance by remember { mutableStateOf(false) }
@@ -830,6 +869,9 @@ private fun MatchResultDialog(
             Column(horizontalAlignment = Alignment.End) {
                 if (one != null && !confirmAdvance) Button(onClick = { confirmAdvance = true }) { Text("Postoupit bez zápasu…") }
                 else if (one != null && confirmAdvance) Button(onClick = onAdvance) { Text("Ano, potvrdit postup") }
+                if (canEditPairing) {
+                    TextButton(onClick = onEditPairing) { Text("Ruční úprava soupeře") }
+                }
                 if (!isFinished && match.player1Id != null && match.player2Id != null && match.winnerId == null && match.status != "IN_PROGRESS") {
                     TextButton(onClick = onStart) { Text("Označit jako rozehraný") }
                 }
@@ -839,6 +881,98 @@ private fun MatchResultDialog(
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Zavřít") } }
+    )
+}
+
+@Composable
+private fun ManualSwapDialog(
+    match: MatchEntity,
+    participants: List<TournamentParticipantEntity>,
+    playerName: (Long) -> String,
+    onDismiss: () -> Unit,
+    onConfirmSwap: (Long, Long) -> Unit
+) {
+    val thisOpeningIndex = match.matchKey.removePrefix("W1_").toIntOrNull() ?: -1
+    val thisMatchIds = listOfNotNull(match.player1Id, match.player2Id).toSet()
+    val replacementOptions = participants.filterIndexed { index, candidate ->
+        candidate.playerId !in thisMatchIds && index / 2 != thisOpeningIndex
+    }
+    var movingPlayerId by remember(match.matchNumber) {
+        mutableStateOf(match.player1Id ?: match.player2Id ?: 0L)
+    }
+    var replacementPlayerId by remember(match.matchNumber) {
+        mutableStateOf(replacementOptions.firstOrNull()?.playerId)
+    }
+    var movingMenu by remember { mutableStateOf(false) }
+    var replacementMenu by remember { mutableStateOf(false) }
+    var confirmStep by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ruční úprava soupeře") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Úvodní dvojice · zápas ${match.matchNumber}", color = MaterialTheme.colorScheme.secondary)
+                Text("Kterého hráče chceš přesunout?")
+                Box {
+                    OutlinedButton(onClick = { movingMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(playerName(movingPlayerId), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    DropdownMenu(expanded = movingMenu, onDismissRequest = { movingMenu = false }) {
+                        listOfNotNull(match.player1Id, match.player2Id).forEach { id ->
+                            DropdownMenuItem(text = { Text(playerName(id)) }, onClick = {
+                                movingPlayerId = id
+                                movingMenu = false
+                            })
+                        }
+                    }
+                }
+                Text("S kým si má vyměnit místo?")
+                Box {
+                    OutlinedButton(
+                        onClick = { replacementMenu = true },
+                        enabled = replacementOptions.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(replacementPlayerId?.let(playerName) ?: "Není dostupný další hráč",
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    DropdownMenu(expanded = replacementMenu, onDismissRequest = { replacementMenu = false }) {
+                        replacementOptions.forEach { participant ->
+                            DropdownMenuItem(
+                                text = { Text(participant.playerNameSnapshot) },
+                                onClick = { replacementPlayerId = participant.playerId; replacementMenu = false }
+                            )
+                        }
+                    }
+                }
+                if (confirmStep) {
+                    Text(
+                        "Potvrzením se přepočítají navazující zápasy. Výsledky zápasů, ve kterých se změní hráči, se zruší; body a ELO se vypočítají znovu.",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                } else {
+                    Text(
+                        "Už odehrané výsledky zůstanou zachovány, pokud se nezmění účastníci daného zápasu.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (!confirmStep) {
+                Button(onClick = { confirmStep = true }, enabled = replacementPlayerId != null) {
+                    Text("Zkontrolovat změnu")
+                }
+            } else {
+                Button(
+                    onClick = { replacementPlayerId?.let { onConfirmSwap(movingPlayerId, it) } },
+                    enabled = replacementPlayerId != null && movingPlayerId != 0L
+                ) { Text("Potvrdit výměnu") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (confirmStep) "Zrušit" else "Zavřít") } }
     )
 }
 
@@ -996,6 +1130,7 @@ private fun PlayerProfileDialog(
         text = {
             Column(Modifier.heightIn(max = 540.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(clanName, color = MaterialTheme.colorScheme.secondary)
+                Text("ELO hodnocení: ${player.eloRating}", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
                 Divider()
                 Text("Zápasy: ${stats?.games ?: 0} · Výhry: ${stats?.wins ?: 0} · Prohry: ${stats?.losses ?: 0}")
                 Text("Úspěšnost: ${formatPercent(stats?.winRate ?: 0.0)}")
@@ -1144,10 +1279,10 @@ private fun buildTournamentPdf(tournament: TournamentEntity, participants: List<
 }
 
 private fun buildLeaderboardPdf(stats: List<PlayerStats>, clans: Map<Long, ClanEntity>): List<String> = buildList {
-    add("Pozice | Hráč | Klan | Body | Výhry | Prohry | Úspěšnost | W streak | L streak | Nejdelší W")
+    add("Pozice | Hráč | ELO | Klan | Body | Výhry | Prohry | Úspěšnost | W streak | L streak | Nejdelší W")
     val sorted = stats.sortedWith(compareByDescending<PlayerStats> { it.points }.thenByDescending { it.winRate }.thenByDescending { it.wins })
     sorted.forEachIndexed { index, s ->
-        add("${index + 1}. | ${s.player.name} | ${s.player.clanId?.let { clans[it]?.name } ?: "Bez klanu"} | ${s.points} | ${s.wins} | ${s.losses} | ${formatPercent(s.winRate)} | ${s.currentWinStreak} | ${s.currentLossStreak} | ${s.longestWinStreak}")
+        add("${index + 1}. | ${s.player.name} | ${s.player.eloRating} | ${s.player.clanId?.let { clans[it]?.name } ?: "Bez klanu"} | ${s.points} | ${s.wins} | ${s.losses} | ${formatPercent(s.winRate)} | ${s.currentWinStreak} | ${s.currentLossStreak} | ${s.longestWinStreak}")
     }
 }
 
@@ -1167,6 +1302,7 @@ private fun buildPlayerPdf(
     tournaments: List<TournamentEntity>, points: List<PointTransactionEntity>, allPlayers: List<PlayerEntity>
 ): List<String> = buildList {
     add("Hráč: ${player.name}")
+    add("ELO: ${player.eloRating}")
     add("Aktuální klan: ${player.clanId?.let { id -> "ID $id" } ?: "Bez klanu"}")
     add("Zápasy: ${stat?.games ?: 0} | Výhry: ${stat?.wins ?: 0} | Prohry: ${stat?.losses ?: 0}")
     add("Úspěšnost: ${formatPercent(stat?.winRate ?: 0.0)}")
