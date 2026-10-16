@@ -430,6 +430,7 @@ class TournamentRepository(private val database: AppDatabase) {
 
             if (match.manualPlayer1Locked) p1 = match.manualPlayer1Id?.let(participantById::get)
             if (match.manualPlayer2Locked) p2 = match.manualPlayer2Id?.let(participantById::get)
+            val sameCurrentEntrants = BracketEngine.hasSameEntrants(match, p1?.playerId, p2?.playerId)
             match.matchNumber to match.copy(
                 player1Id = p1?.playerId,
                 player1NameSnapshot = p1?.playerNameSnapshot,
@@ -443,7 +444,7 @@ class TournamentRepository(private val database: AppDatabase) {
                 routedWinnerMatchNumber = null,
                 routedLoserMatchNumber = null,
                 status = when {
-                    match.status == "IN_PROGRESS" && match.selectedWinnerId == null -> "IN_PROGRESS"
+                    match.status == "IN_PROGRESS" && sameCurrentEntrants -> "IN_PROGRESS"
                     p1 != null && p2 != null -> "READY"
                     p1 != null || p2 != null -> "WAITING_FOR_OPPONENT"
                     else -> "WAITING_FOR_PLAYERS"
