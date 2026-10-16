@@ -166,16 +166,14 @@ class TournamentRepositoryTest {
         repository.recordWinner(tournamentId, matchNumbers.getValue("W1_0"), ids[0])
         repository.recordWinner(tournamentId, matchNumbers.getValue("W1_1"), ids[2])
         repository.recordWinner(tournamentId, matchNumbers.getValue("W2_0"), ids[0])
-        repository.recordWinner(tournamentId, matchNumbers.getValue("L1_0"), ids[1])
-        repository.recordWinner(tournamentId, matchNumbers.getValue("L2_0"), ids[1])
-        assertEquals(ids[1], database.tournamentDao().getMatches(tournamentId).first { it.matchKey == "L2_0" }.winnerId)
+        repository.recordWinner(tournamentId, matchNumbers.getValue("W1_2"), ids[1])
+        assertEquals(ids[1], database.tournamentDao().getMatches(tournamentId).first { it.matchKey == "W1_2" }.winnerId)
 
-        // The first round correction changes both semifinals' participants. Old results must not survive.
+        // Correcting an opening result changes downstream seats; invalid dependent results must clear.
         repository.recordWinner(tournamentId, matchNumbers.getValue("W1_0"), ids[1])
         val corrected = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
         org.junit.Assert.assertNull(corrected.getValue("W2_0").winnerId)
-        org.junit.Assert.assertNull(corrected.getValue("L1_0").winnerId)
-        org.junit.Assert.assertNull(corrected.getValue("L2_0").winnerId)
+        org.junit.Assert.assertNull(corrected.getValue("W1_2").winnerId)
     }
 
 
