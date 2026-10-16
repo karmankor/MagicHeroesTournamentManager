@@ -214,9 +214,12 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                     tournament = activeTournament,
                     matches = selectedMatches,
                     participants = selectedParticipants,
+                    availablePlayers = players,
                     playerName = { id -> allPlayers.firstOrNull { it.id == id }?.name ?: allParticipants.firstOrNull { it.playerId == id }?.playerNameSnapshot ?: "Neznámý hráč" },
                     points = points.filter { it.tournamentId == activeTournament.id },
                     onBack = { selectedTournamentId = null; vm.closeTournament() },
+                    onAddExistingPlayer = { vm.addPlayerToWaitlist(activeTournament.id, it) },
+                    onAddNewPlayer = { vm.createPlayerInWaitlist(activeTournament.id, it) },
                     onStartMatch = { vm.startMatch(activeTournament.id, it) },
                     onWinner = { matchNumber, winnerId -> vm.recordWinner(activeTournament.id, matchNumber, winnerId) },
                     onAdvance = { vm.advanceWithoutMatch(activeTournament.id, it) },
@@ -617,12 +620,13 @@ private fun LeaderboardScreen(
 
 @Composable
 private fun TournamentDetailScreen(
-    tournament: TournamentEntity, matches: List<MatchEntity>, participants: List<TournamentParticipantEntity>, playerName: (Long) -> String,
-    points: List<PointTransactionEntity>, onBack: () -> Unit, onStartMatch: (Int) -> Unit, onWinner: (Int, Long) -> Unit,
-    onAdvance: (Int) -> Unit, onFinish: () -> Unit, onExport: () -> Unit
+    tournament: TournamentEntity, matches: List<MatchEntity>, participants: List<TournamentParticipantEntity>, availablePlayers: List<PlayerEntity>, playerName: (Long) -> String,
+    points: List<PointTransactionEntity>, onBack: () -> Unit, onAddExistingPlayer: (Long) -> Unit, onAddNewPlayer: (String) -> Unit,
+    onStartMatch: (Int) -> Unit, onWinner: (Int, Long) -> Unit, onAdvance: (Int) -> Unit, onFinish: () -> Unit, onExport: () -> Unit
 ) {
     var matchToEdit by remember { mutableStateOf<MatchEntity?>(null) }
     var showFinishConfirm by remember { mutableStateOf(false) }
+    var showWaitlistDialog by remember { mutableStateOf(false) }
     val completed = matches.count { it.winnerId != null }
     val finalMatch = matches.firstOrNull { it.isTournamentFinal }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -632,15 +636,33 @@ private fun TournamentDetailScreen(
             StatusPill(tournament.status)
         }
         Text(tournament.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("${tournament.dateIso} · ${participants.size} hráčů", color = MaterialTheme.colorScheme.secondary)
+        val queued = participants.filter { it.isQueued }.sortedBy { it.seed }
+        val activeParticipants = participants.filterNot { it.isQueued }
+        Text("${tournament.dateIso} · ${activeParticipants.size} hráčů" + if (queued.isNotEmpty()) " · ${queued.size} čeká" else "", color = MaterialTheme.colorScheme.secondary)
         if (tournament.note.isNotBlank()) Text(tournament.note, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (tournament.status == TournamentEntity.STATUS_ACTIVE) {
+            OutlinedButton(onClick = { showWaitlistDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("+ Přidat hráče do čekací fronty")
+            }
+        }
+        if (queued.isNotEmpty()) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("ČEKACÍ FRONTA", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
+                    queued.forEachIndexed { index, participant ->
+                        Text("${index + 1}. ${participant.playerNameSnapshot}", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Text("Hráči zůstávají ve frontě, dokud jim organizátor nepřiřadí volné místo.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatTile("Zápasy", "$completed/${matches.size}", Modifier.weight(1f))
             StatTile("Čeká", matches.count { it.status.startsWith("WAITING") }.toString(), Modifier.weight(1f))
             StatTile("Body", points.sumOf { it.points }.toString(), Modifier.weight(1f))
         }
         Text("ÚČASTNÍCI", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
-        Text(participants.joinToString("  ·  ") { it.playerNameSnapshot }, style = MaterialTheme.typography.bodySmall)
+        Text(activeParticipants.joinToString("  ·  ") { it.playerNameSnapshot }, style = MaterialTheme.typography.bodySmall)
         Divider(color = Color(0xFF393142))
         Text("BRACKET", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text("Posouvej do stran. Kliknutím na zápas zadáš nebo opravíš výsledek.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -683,6 +705,13 @@ private fun TournamentDetailScreen(
             Text("Finále je rozhodnuté. Po potvrzení můžeš turnaj ukončit.", color = MaterialTheme.colorScheme.secondary)
         }
     }
+
+    if (showWaitlistDialog) WaitlistDialog(
+        availablePlayers = availablePlayers.filter { player -> participants.none { it.playerId == player.id } },
+        onDismiss = { showWaitlistDialog = false },
+        onAddExisting = { id -> onAddExistingPlayer(id); showWaitlistDialog = false },
+        onAddNew = { name -> onAddNewPlayer(name); showWaitlistDialog = false }
+    )
 
     matchToEdit?.let { match ->
         val nameFromThisMatch: (Long) -> String = { id ->
@@ -844,6 +873,57 @@ private fun CreateTournamentDialog(players: List<PlayerEntity>, clans: List<Clan
             }
         },
         confirmButton = { Button(onClick = { onCreate(name, date, note, selected.toList()) }, enabled = name.isNotBlank() && selected.size in 2..32) { Text("Zahájit turnaj") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
+    )
+}
+
+@Composable
+private fun WaitlistDialog(
+    availablePlayers: List<PlayerEntity>,
+    onDismiss: () -> Unit,
+    onAddExisting: (Long) -> Unit,
+    onAddNew: (String) -> Unit
+) {
+    var selectedId by remember { mutableStateOf<Long?>(null) }
+    var newName by remember { mutableStateOf("") }
+    var showPlayers by remember { mutableStateOf(false) }
+    val selected = availablePlayers.firstOrNull { it.id == selectedId }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Přidat do čekací fronty") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Vyber existujícího hráče, nebo zadej nového.")
+                Box {
+                    OutlinedButton(onClick = { showPlayers = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(selected?.name ?: "Vybrat existujícího hráče")
+                    }
+                    DropdownMenu(expanded = showPlayers, onDismissRequest = { showPlayers = false }) {
+                        availablePlayers.forEach { player ->
+                            DropdownMenuItem(text = { Text(player.name) }, onClick = {
+                                selectedId = player.id
+                                newName = ""
+                                showPlayers = false
+                            })
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it; if (it.isNotBlank()) selectedId = null },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Nebo vytvořit nového hráče") },
+                    singleLine = true
+                )
+                if (availablePlayers.isEmpty()) Text("Žádní dostupní existující hráči.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { if (newName.isNotBlank()) onAddNew(newName.trim()) else selectedId?.let(onAddExisting) },
+                enabled = newName.isNotBlank() || selectedId != null
+            ) { Text("Přidat do fronty") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
     )
 }
@@ -1030,7 +1110,7 @@ private fun buildTournamentPdf(tournament: TournamentEntity, participants: List<
     add("Stav: ${tournament.status}")
     if (tournament.note.isNotBlank()) { add("Poznámka: ${tournament.note}"); add("") }
     add("ÚČASTNÍCI")
-    participants.sortedBy { it.seed }.forEach { add("${it.seed}. ${it.playerNameSnapshot} — ${it.clanNameSnapshot ?: "Bez klanu"}") }
+    participants.sortedBy { it.seed }.forEach { add("${if (it.isQueued) "ČEKÁ ${it.seed}. " else "${it.seed}. "}${it.playerNameSnapshot} — ${it.clanNameSnapshot ?: "Bez klanu"}") }
     add("")
     add("ZÁPASY")
     matches.forEach { m ->
