@@ -55,16 +55,23 @@ object BracketEngine {
         }
 
         val losersByRound = mutableMapOf<Int, List<Blueprint>>()
-        for (pairIndex in 0 until winnersRoundCount - 1) {
-            val count = size shr (pairIndex + 2)
-            val oddRound = pairIndex * 2 + 1
-            val evenRound = oddRound + 1
-            val oddNodes = (0 until count).map { Blueprint("L${oddRound}_$it", oddRound, "LOSERS") }
-            val evenNodes = (0 until count).map { Blueprint("L${evenRound}_$it", evenRound, "LOSERS") }
-            losersByRound[oddRound] = oddNodes
-            losersByRound[evenRound] = evenNodes
-            nodes += oddNodes
-            nodes += evenNodes
+        // The opening losers round has the same number of matches as winners round 1.
+        // Capacities for the supported brackets are:
+        // size 8:  4, 2, 2, 1
+        // size 16: 8, 4, 4, 2, 2, 1
+        // size 32: 16, 8, 8, 4, 4, 2, 2, 1
+        // Later rounds shrink only when two lower-bracket matches feed one match.
+        val lowerRoundCount = 2 * (winnersRoundCount - 1)
+        for (round in 1..lowerRoundCount) {
+            val count = when {
+                round == lowerRoundCount -> 1
+                else -> size shr ((round + 1) / 2)
+            }
+            val row = (0 until count).map { index ->
+                Blueprint("L${round}_${index}", round, "LOSERS")
+            }
+            losersByRound[round] = row
+            nodes += row
         }
 
         val finalNode = Blueprint("G", winnersRoundCount + 1, "FINAL", final = true)
@@ -93,25 +100,22 @@ object BracketEngine {
             }
         }
 
-        // Losers branch: odd rounds pair lower-bracket winners; even rounds receive
-        // the matching winners plus the loser falling from the next winners round.
-        val lowerRoundCount = 2 * (winnersRoundCount - 1)
+        // Connect lower-bracket winners according to the actual next-round capacity.
+        // When the next round is smaller, pairs feed its two slots; when capacities
+        // are equal, each winner advances into a separate waiting match.
         for (round in 1..lowerRoundCount) {
             val row = losersByRound.getValue(round)
+            val nextRow = losersByRound[round + 1]
             row.forEachIndexed { index, node ->
-                when {
-                    round == lowerRoundCount -> {
-                        node.nextWinnerKey = "G"
-                        node.winnerTargetSlot = 1
-                    }
-                    round % 2 == 1 -> {
-                        node.nextWinnerKey = "L${round + 1}_$index"
-                        node.winnerTargetSlot = 0
-                    }
-                    else -> {
-                        node.nextWinnerKey = "L${round + 1}_${index / 2}"
-                        node.winnerTargetSlot = index % 2
-                    }
+                if (round == lowerRoundCount) {
+                    node.nextWinnerKey = "G"
+                    node.winnerTargetSlot = 1
+                } else if (nextRow != null && nextRow.size < row.size) {
+                    node.nextWinnerKey = "L${round + 1}_${index / 2}"
+                    node.winnerTargetSlot = index % 2
+                } else {
+                    node.nextWinnerKey = "L${round + 1}_${index}"
+                    node.winnerTargetSlot = 0
                 }
             }
         }
