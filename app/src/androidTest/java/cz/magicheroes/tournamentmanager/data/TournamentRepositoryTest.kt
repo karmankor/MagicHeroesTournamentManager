@@ -107,6 +107,36 @@ class TournamentRepositoryTest {
     }
 
     @Test
+    fun withdrawalLeavesVacantSeatWithoutChangingOtherPairings() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Odstoupení", "2026-10-16", "", ids)
+
+        repository.withdrawPlayer(tournamentId, ids[0])
+        val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(null, matches.getValue("W1_0").player1Id)
+        assertEquals(ids[1], matches.getValue("W1_0").player2Id)
+        assertEquals(ids[2], matches.getValue("W1_1").player1Id)
+        assertEquals(ids[3], matches.getValue("W1_1").player2Id)
+    }
+
+    @Test
+    fun withdrawalAfterPlayedMatchPreservesThatResultButDoesNotAdvanceWithdrawnPlayer() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Odstoupení po zápase", "2026-10-16", "", ids)
+
+        repository.recordWinner(tournamentId, 1, ids[0])
+        repository.withdrawPlayer(tournamentId, ids[1])
+        val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(ids[0], matches.getValue("W1_0").winnerId)
+        assertEquals(ids[1], matches.getValue("W1_0").player2Id)
+        assertEquals(null, matches.getValue("L1_0").player1Id)
+        assertEquals(ids[0], matches.getValue("W2_0").player1Id)
+        assertEquals(2, database.tournamentDao().getPointsForTournament(tournamentId).sumOf { it.points })
+    }
+
+    @Test
     fun correctingEarlierWinnerClearsResultsWhoseMatchupChanged() = runBlocking {
         listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
         val ids = database.tournamentDao().getPlayers().map { it.id }

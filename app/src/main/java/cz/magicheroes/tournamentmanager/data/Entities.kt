@@ -52,7 +52,8 @@ data class TournamentParticipantEntity(
     val clanIdSnapshot: Long? = null,
     val clanNameSnapshot: String? = null,
     val seed: Int,
-    @ColumnInfo(defaultValue = "0") val isQueued: Boolean = false
+    @ColumnInfo(defaultValue = "0") val isQueued: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val isWithdrawn: Boolean = false
 )
 
 @Entity(

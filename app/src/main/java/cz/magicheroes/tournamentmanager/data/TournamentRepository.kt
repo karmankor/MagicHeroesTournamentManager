@@ -25,7 +25,7 @@ class TournamentRepository(private val database: AppDatabase) {
         if (clanId != null) require(dao.getClan(clanId) != null) { "Vybraný klan už neexistuje." }
         if (old.clanId != clanId) {
             val activeIds = dao.getTournaments().filter { it.status == TournamentEntity.STATUS_ACTIVE }.map { it.id }
-            val isPlaying = activeIds.any { tournamentId -> dao.getParticipants(tournamentId).any { it.playerId == id } }
+            val isPlaying = activeIds.any { tournamentId -> dao.getParticipants(tournamentId).any { it.playerId == id && !it.isWithdrawn } }
             require(!isPlaying) { "Klan hráče nelze měnit během aktivního turnaje. Po jeho ukončení můžeš přestup provést." }
         }
         dao.updatePlayer(old.copy(name = clean, clanId = clanId))
@@ -35,7 +35,7 @@ class TournamentRepository(private val database: AppDatabase) {
     suspend fun archivePlayer(id: Long) {
         val activeTournamentIds = dao.getTournaments().filter { it.status == TournamentEntity.STATUS_ACTIVE }.map { it.id }
         activeTournamentIds.forEach { tournamentId ->
-            require(dao.getParticipants(tournamentId).none { it.playerId == id }) {
+            require(dao.getParticipants(tournamentId).none { it.playerId == id && !it.isWithdrawn }) {
                 "Hráče nelze archivovat během aktivního turnaje. Nejprve turnaj ukonči."
             }
         }
@@ -76,7 +76,7 @@ class TournamentRepository(private val database: AppDatabase) {
         require(uniqueIds.size in 2..32) { "Vyber 2 až 32 různých hráčů." }
 
         val activeTournaments = dao.getTournaments().filter { it.status == TournamentEntity.STATUS_ACTIVE }
-        val activePlayers = activeTournaments.flatMap { dao.getParticipants(it.id) }.map { it.playerId }.toSet()
+        val activePlayers = activeTournaments.flatMap { dao.getParticipants(it.id).filterNot { participant -> participant.isWithdrawn } }.map { it.playerId }.toSet()
         require(uniqueIds.none { it in activePlayers }) {
             "Některý z vybraných hráčů už je v jiném aktivním turnaji."
         }
@@ -116,7 +116,7 @@ class TournamentRepository(private val database: AppDatabase) {
         val participants = dao.getParticipants(tournamentId)
         require(participants.none { it.playerId == playerId }) { "Hráč už je účastníkem nebo čeká ve frontě." }
         val activeTournamentIds = dao.getTournaments().filter { it.status == TournamentEntity.STATUS_ACTIVE }.map { it.id }
-        val alreadyPlaying = activeTournamentIds.any { id -> dao.getParticipants(id).any { it.playerId == playerId } }
+        val alreadyPlaying = activeTournamentIds.any { id -> dao.getParticipants(id).any { it.playerId == playerId && !it.isWithdrawn } }
         require(!alreadyPlaying) { "Hráč už je přihlášený do jiného aktivního turnaje." }
         val clan = player.clanId?.let { dao.getClan(it) }
         dao.insertParticipants(listOf(TournamentParticipantEntity(
@@ -153,19 +153,20 @@ class TournamentRepository(private val database: AppDatabase) {
         val participants = dao.getParticipants(tournamentId)
         val queued = participants.filter { it.isQueued }.minByOrNull { it.seed }
             ?: error("Čekací fronta je prázdná.")
-        val active = participants.filterNot { it.isQueued }.sortedBy { it.seed }
+        val active = participants.filterNot { it.isQueued || it.isWithdrawn }
         val matches = dao.getMatches(tournamentId)
         val openingMatches = matches.filter { it.branch == "WINNERS" && it.roundNumber == 1 }
-        require(openingMatches.isNotEmpty() && active.size < openingMatches.size * 2) {
-            "V bracketu teď není volné místo pro dalšího hráče."
-        }
-        val nextMatchKey = "W1_${active.size / 2}"
-        val target = openingMatches.firstOrNull { it.matchKey == nextMatchKey }
-            ?: error("Volné místo v bracketu se nepodařilo najít.")
-        require(target.winnerId == null && target.selectedWinnerId == null && !target.byeConfirmed && target.status != "IN_PROGRESS") {
-            "Další volné místo už bylo odehráno nebo potvrzeno. Výsledky nebudu měnit."
-        }
-        dao.updateParticipant(queued.copy(isQueued = false))
+        val capacity = openingMatches.size * 2
+        val occupiedSeeds = active.map { it.seed }.toSet()
+        val targetSeed = (1..capacity).firstOrNull { seed ->
+            if (seed in occupiedSeeds) return@firstOrNull false
+            val key = "W1_${(seed - 1) / 2}"
+            val target = openingMatches.firstOrNull { it.matchKey == key } ?: return@firstOrNull false
+            val slotPlayerId = if ((seed - 1) % 2 == 0) target.player1Id else target.player2Id
+            slotPlayerId == null && target.winnerId == null && target.selectedWinnerId == null &&
+                !target.byeConfirmed && target.status != "IN_PROGRESS"
+        } ?: error("V bracketu teď není volné, neodehrané místo pro dalšího hráče.")
+        dao.updateParticipant(queued.copy(isQueued = false, isWithdrawn = false, seed = targetSeed))
         rebuildBracket(tournamentId)
     }
 
@@ -178,7 +179,7 @@ class TournamentRepository(private val database: AppDatabase) {
                 "Dvojice lze upravovat pouze v zahájeném turnaji."
             }
             val participants = dao.getParticipants(tournamentId)
-            val active = participants.filterNot { it.isQueued }.sortedBy { it.seed }
+            val active = participants.filterNot { it.isQueued || it.isWithdrawn }.sortedBy { it.seed }
             val first = active.firstOrNull { it.playerId == firstPlayerId } ?: error("První hráč není aktivním účastníkem turnaje.")
             val second = active.firstOrNull { it.playerId == secondPlayerId } ?: error("Druhý hráč není aktivním účastníkem turnaje.")
             val firstIndex = active.indexOf(first)
@@ -198,6 +199,22 @@ class TournamentRepository(private val database: AppDatabase) {
             rebuildPoints(tournamentId)
             rebuildEloRatings()
         }
+
+    suspend fun withdrawPlayer(tournamentId: Long, playerId: Long) = database.withTransaction {
+        val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
+        require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Odstoupit lze pouze z aktivního turnaje." }
+        val participant = dao.getParticipants(tournamentId).firstOrNull { it.playerId == playerId }
+            ?: error("Hráč není účastníkem tohoto turnaje.")
+        require(!participant.isQueued && !participant.isWithdrawn) { "Tento hráč už čeká nebo z turnaje odstoupil." }
+        val hasInProgressMatch = dao.getMatches(tournamentId).any {
+            it.status == "IN_PROGRESS" && (it.player1Id == playerId || it.player2Id == playerId)
+        }
+        require(!hasInProgressMatch) { "Nejprve dokonči nebo zruš právě rozehraný zápas." }
+        dao.updateParticipant(participant.copy(isWithdrawn = true))
+        rebuildBracket(tournamentId)
+        rebuildPoints(tournamentId)
+        rebuildEloRatings()
+    }
 
     suspend fun recalculateEloRatings() = database.withTransaction {
         rebuildEloRatings()
@@ -265,6 +282,10 @@ class TournamentRepository(private val database: AppDatabase) {
         val previousByNumber = storedMatches.associateBy { it.matchNumber }
         val participants = dao.getParticipants(tournamentId).filterNot { it.isQueued }.sortedBy { it.seed }
         val participantById = participants.associateBy { it.playerId }
+        // Seeds are fixed seat numbers. A withdrawal leaves a hole instead of shifting all later
+        // entrants to new opponents. A player who already completed their opening match remains
+        // in that historical match, but is not sent to a future round.
+        val participantBySeed = participants.filterNot { it.isWithdrawn }.associateBy { it.seed }
         val working = storedMatches.associate { it.matchNumber to it }.toMutableMap()
 
         // Clear all derived positions and results; keep the organizer's chosen winners.
@@ -274,8 +295,13 @@ class TournamentRepository(private val database: AppDatabase) {
             var p1: TournamentParticipantEntity? = null
             var p2: TournamentParticipantEntity? = null
             if (openingIndex != null && match.branch == "WINNERS" && match.roundNumber == 1) {
-                p1 = participants.getOrNull(openingIndex * 2)
-                p2 = participants.getOrNull(openingIndex * 2 + 1)
+                val previous = previousByNumber[match.matchNumber] ?: match
+                val firstSeed = openingIndex * 2 + 1
+                val secondSeed = openingIndex * 2 + 2
+                p1 = participantBySeed[firstSeed]
+                    ?: previous.player1Id?.let(participantById::get)?.takeIf { it.isWithdrawn && previous.winnerId != null }
+                p2 = participantBySeed[secondSeed]
+                    ?: previous.player2Id?.let(participantById::get)?.takeIf { it.isWithdrawn && previous.winnerId != null }
             } else if (directTwoPlayerFinal) {
                 p1 = participants.getOrNull(0)
                 p2 = participants.getOrNull(1)
@@ -349,11 +375,11 @@ class TournamentRepository(private val database: AppDatabase) {
             )
             working[number] = current
 
-            if (winner != null && current.nextWinnerMatchNumber != null) {
+            if (winner != null && current.nextWinnerMatchNumber != null && participantById[winner]?.isWithdrawn != true) {
                 val sourceName = participantById[winner]?.playerNameSnapshot
                 assignSlot(working, current.nextWinnerMatchNumber, current.winnerTargetSlot, winner, sourceName)
             }
-            if (loser != null && current.nextLoserMatchNumber != null) {
+            if (loser != null && current.nextLoserMatchNumber != null && participantById[loser]?.isWithdrawn != true) {
                 val sourceName = participantById[loser]?.playerNameSnapshot
                 assignSlot(working, current.nextLoserMatchNumber, current.loserTargetSlot, loser, sourceName)
             }
