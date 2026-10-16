@@ -915,6 +915,102 @@ private fun MatchCard(match: MatchEntity, playerName: (Long) -> String, playerEl
 }
 
 @Composable
+private fun ManualSlotDialog(
+    match: MatchEntity,
+    participants: List<TournamentParticipantEntity>,
+    onDismiss: () -> Unit,
+    onSave: (Int, Long?, Boolean) -> Unit
+) {
+    var selectedSlot by remember(match.matchNumber) { mutableStateOf(0) }
+    var slot1Player by remember(match.matchNumber) { mutableStateOf(match.manualPlayer1Id ?: match.player1Id) }
+    var slot2Player by remember(match.matchNumber) { mutableStateOf(match.manualPlayer2Id ?: match.player2Id) }
+    var slot1Locked by remember(match.matchNumber) { mutableStateOf(match.manualPlayer1Locked) }
+    var slot2Locked by remember(match.matchNumber) { mutableStateOf(match.manualPlayer2Locked) }
+    var playerMenu by remember { mutableStateOf(false) }
+
+    val selectedPlayer = if (selectedSlot == 0) slot1Player else slot2Player
+    val selectedLocked = if (selectedSlot == 0) slot1Locked else slot2Locked
+    val currentPlayer = if (selectedSlot == 0) match.player1Id else match.player2Id
+    val nameFor: (Long?) -> String = { id ->
+        id?.let { value -> participants.firstOrNull { it.playerId == value }?.playerNameSnapshot }
+            ?: "Volná pozice"
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ruční obsazení · zápas " + match.matchNumber) },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(columnTitle(match.branch, match.roundNumber), color = MaterialTheme.colorScheme.secondary)
+                Text("Vyber pozici a hráče. Ruční umístění má přednost před automatickým přesunem.")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (selectedSlot == 0) Button(onClick = { selectedSlot = 0 }) { Text("Pozice 1") }
+                    else OutlinedButton(onClick = { selectedSlot = 0 }) { Text("Pozice 1") }
+                    if (selectedSlot == 1) Button(onClick = { selectedSlot = 1 }) { Text("Pozice 2") }
+                    else OutlinedButton(onClick = { selectedSlot = 1 }) { Text("Pozice 2") }
+                }
+                Text("Aktuální obsazení: " + nameFor(currentPlayer))
+                OutlinedButton(onClick = { playerMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(nameFor(selectedPlayer))
+                }
+                DropdownMenu(expanded = playerMenu, onDismissRequest = { playerMenu = false }) {
+                    participants.forEach { participant ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(participant.playerNameSnapshot + if (participant.isQueued) " · čeká" else "")
+                            },
+                            onClick = {
+                                if (selectedSlot == 0) {
+                                    slot1Player = participant.playerId
+                                    slot1Locked = true
+                                } else {
+                                    slot2Player = participant.playerId
+                                    slot2Locked = true
+                                }
+                                playerMenu = false
+                            }
+                        )
+                    }
+                }
+                OutlinedButton(
+                    onClick = {
+                        if (selectedSlot == 0) {
+                            slot1Player = null
+                            slot1Locked = true
+                        } else {
+                            slot2Player = null
+                            slot2Locked = true
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Ponechat pozici prázdnou") }
+                TextButton(onClick = {
+                    if (selectedSlot == 0) {
+                        slot1Player = match.player1Id
+                        slot1Locked = false
+                    } else {
+                        slot2Player = match.player2Id
+                        slot2Locked = false
+                    }
+                }) { Text("Obnovit automatické umístění") }
+                if (selectedLocked) {
+                    Text("Pozice je ručně uzamčená.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onSave(selectedSlot, selectedPlayer, selectedLocked)
+            }) { Text("Uložit pozici") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
+    )
+}
+
+@Composable
 private fun MatchResultDialog(
     match: MatchEntity, playerName: (Long) -> String, isFinished: Boolean, onDismiss: () -> Unit, onStart: () -> Unit,
     onConfirmWinner: (Long) -> Unit, onAdvance: () -> Unit,
