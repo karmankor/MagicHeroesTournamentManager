@@ -84,7 +84,15 @@ data class MatchEntity(
     val loserTargetSlot: Int? = null,
     val isTournamentFinal: Boolean = false,
     val byeConfirmed: Boolean = false,
-    val completedAt: Long? = null
+    val completedAt: Long? = null,
+    @ColumnInfo(defaultValue = "0") val manualPlayer1Locked: Boolean = false,
+    val manualPlayer1Id: Long? = null,
+    val manualPlayer1AssignedAt: Long? = null,
+    @ColumnInfo(defaultValue = "0") val manualPlayer2Locked: Boolean = false,
+    val manualPlayer2Id: Long? = null,
+    val manualPlayer2AssignedAt: Long? = null,
+    val routedWinnerMatchNumber: Int? = null,
+    val routedLoserMatchNumber: Int? = null
 )
 
 @Entity(
@@ -102,5 +110,16 @@ data class PointTransactionEntity(
     /** Clan at the time this result was recorded, not the player's current clan. */
     val clanIdSnapshot: Long? = null,
     val clanNameSnapshot: String? = null,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "clan_point_adjustments", indices = [Index(value = ["clanIdSnapshot"])])
+data class ClanPointAdjustmentEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    /** Snapshot IDs/names deliberately have no FK so history survives clan deletion. */
+    val clanIdSnapshot: Long,
+    val clanNameSnapshot: String,
+    val points: Int,
+    val reason: String,
     val createdAt: Long = System.currentTimeMillis()
 )
