@@ -234,12 +234,6 @@ class TournamentRepository(private val database: AppDatabase) {
             require(matches.none { it.status == "IN_PROGRESS" && (it.player1Id == playerId || it.player2Id == playerId) }) {
                 "Hráč právě hraje rozehraný zápas. Nejprve ho dokonči."
             }
-            val currentSlotId = if (slot == 0) target.player1Id else target.player2Id
-            if (target.branch == "WINNERS" && target.roundNumber == 1 &&
-                currentSlotId != null && currentSlotId != playerId
-            ) {
-                error("Obsazenou úvodní pozici nelze přepsat. Použij ruční úpravu úvodních dvojic nebo vyber volné pole.")
-            }
             require((if (slot == 0) target.player2Id else target.player1Id) != playerId) {
                 "Stejný hráč nemůže být v jednom zápase v obou pozicích."
             }
