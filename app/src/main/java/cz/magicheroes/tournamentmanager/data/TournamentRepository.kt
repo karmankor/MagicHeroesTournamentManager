@@ -461,6 +461,12 @@ class TournamentRepository(private val database: AppDatabase) {
                 p2 = match.player2Id?.let(participantById::get)
             }
 
+            // An in-progress match can already contain players routed into dynamically
+            // chosen slots. Preserve that exact pairing during unrelated recalculations.
+            if (match.status == "IN_PROGRESS" && match.selectedWinnerId == null) {
+                p1 = match.player1Id?.let(participantById::get)
+                p2 = match.player2Id?.let(participantById::get)
+            }
             if (match.manualPlayer1Locked) p1 = match.manualPlayer1Id?.let(participantById::get)
             if (match.manualPlayer2Locked) p2 = match.manualPlayer2Id?.let(participantById::get)
             val sameCurrentEntrants = BracketEngine.hasSameEntrants(match, p1?.playerId, p2?.playerId)
