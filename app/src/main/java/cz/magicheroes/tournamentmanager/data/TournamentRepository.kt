@@ -435,8 +435,11 @@ class TournamentRepository(private val database: AppDatabase) {
                 player1NameSnapshot = p1?.playerNameSnapshot,
                 player2Id = p2?.playerId,
                 player2NameSnapshot = p2?.playerNameSnapshot,
+                selectedWinnerId = null,
                 winnerId = null,
                 loserId = null,
+                byeConfirmed = false,
+                completedAt = null,
                 routedWinnerMatchNumber = null,
                 routedLoserMatchNumber = null,
                 status = when {
