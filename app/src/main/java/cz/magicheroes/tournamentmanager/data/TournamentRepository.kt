@@ -180,6 +180,9 @@ class TournamentRepository(private val database: AppDatabase) {
             }
             val participants = dao.getParticipants(tournamentId)
             val active = participants.filterNot { it.isQueued || it.isWithdrawn }.sortedBy { it.seed }
+            require(dao.getMatches(tournamentId).none { it.status == "IN_PROGRESS" }) {
+                "Nejprve dokonči nebo zruš rozehraný zápas, potom uprav úvodní dvojice."
+            }
             val first = active.firstOrNull { it.playerId == firstPlayerId } ?: error("První hráč není aktivním účastníkem turnaje.")
             val second = active.firstOrNull { it.playerId == secondPlayerId } ?: error("Druhý hráč není aktivním účastníkem turnaje.")
             require((first.seed - 1) / 2 != (second.seed - 1) / 2) {
@@ -237,7 +240,11 @@ class TournamentRepository(private val database: AppDatabase) {
             ?: error("Zápas neexistuje.")
         require(match.player1Id != null && match.player2Id != null) { "Zápas nemá oba hráče. Použij výslovný postup bez zápasu, pokud ho chceš potvrdit." }
         require(winnerId == match.player1Id || winnerId == match.player2Id) { "Vítěz musí být jedním z hráčů tohoto zápasu." }
-        dao.updateMatch(match.copy(selectedWinnerId = winnerId, byeConfirmed = false, completedAt = System.currentTimeMillis()))
+        dao.updateMatch(match.copy(
+            selectedWinnerId = winnerId,
+            byeConfirmed = false,
+            completedAt = match.completedAt ?: System.currentTimeMillis()
+        ))
         rebuildBracket(tournamentId)
         rebuildPoints(tournamentId)
         rebuildEloRatings()
