@@ -2,6 +2,7 @@ package cz.magicheroes.tournamentmanager.data
 
 import androidx.room.withTransaction
 import cz.magicheroes.tournamentmanager.domain.BracketEngine
+import cz.magicheroes.tournamentmanager.domain.EloRating
 import cz.magicheroes.tournamentmanager.domain.Entrant
 import cz.magicheroes.tournamentmanager.domain.ScoringRules
 
@@ -168,6 +169,40 @@ class TournamentRepository(private val database: AppDatabase) {
         rebuildBracket(tournamentId)
     }
 
+    /** Swap the opening-round seeds of two players in different first-round matches. */
+    suspend fun swapOpeningEntrants(tournamentId: Long, firstPlayerId: Long, secondPlayerId: Long, confirmed: Boolean) =
+        database.withTransaction {
+            require(firstPlayerId != secondPlayerId) { "Vyber dva různé hráče." }
+            val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
+            require(tournament.status == TournamentEntity.STATUS_ACTIVE || tournament.status == TournamentEntity.STATUS_FINISHED) {
+                "Dvojice lze upravovat pouze v zahájeném turnaji."
+            }
+            val participants = dao.getParticipants(tournamentId)
+            val active = participants.filterNot { it.isQueued }.sortedBy { it.seed }
+            val first = active.firstOrNull { it.playerId == firstPlayerId } ?: error("První hráč není aktivním účastníkem turnaje.")
+            val second = active.firstOrNull { it.playerId == secondPlayerId } ?: error("Druhý hráč není aktivním účastníkem turnaje.")
+            val firstIndex = active.indexOf(first)
+            val secondIndex = active.indexOf(second)
+            require(firstIndex / 2 != secondIndex / 2) {
+                "Vybraní hráči už jsou ve stejné úvodní dvojici. Vyber hráče z jiného zápasu."
+            }
+            val hasActivity = dao.getMatches(tournamentId).any {
+                it.selectedWinnerId != null || it.winnerId != null || it.byeConfirmed || it.status == "IN_PROGRESS"
+            }
+            require(confirmed || !hasActivity) {
+                "Výměna může ovlivnit již zapsané zápasy. Potvrď přepočítání pavouka."
+            }
+            dao.updateParticipant(first.copy(seed = second.seed))
+            dao.updateParticipant(second.copy(seed = first.seed))
+            rebuildBracket(tournamentId)
+            rebuildPoints(tournamentId)
+            rebuildEloRatings()
+        }
+
+    suspend fun recalculateEloRatings() = database.withTransaction {
+        rebuildEloRatings()
+    }
+
     suspend fun setMatchInProgress(tournamentId: Long, matchNumber: Int) = database.withTransaction {
         val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
         require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Tento turnaj už není aktivní." }
@@ -190,6 +225,7 @@ class TournamentRepository(private val database: AppDatabase) {
         dao.updateMatch(match.copy(selectedWinnerId = winnerId, byeConfirmed = false, completedAt = System.currentTimeMillis()))
         rebuildBracket(tournamentId)
         rebuildPoints(tournamentId)
+        rebuildEloRatings()
     }
 
     suspend fun advanceWithoutMatch(tournamentId: Long, matchNumber: Int) = database.withTransaction {
@@ -204,6 +240,7 @@ class TournamentRepository(private val database: AppDatabase) {
         dao.updateMatch(match.copy(selectedWinnerId = solo, byeConfirmed = true, completedAt = System.currentTimeMillis()))
         rebuildBracket(tournamentId)
         rebuildPoints(tournamentId)
+        rebuildEloRatings()
     }
 
     suspend fun finishTournament(tournamentId: Long) = database.withTransaction {
@@ -347,6 +384,16 @@ class TournamentRepository(private val database: AppDatabase) {
             target.copy(player1Id = playerId, player1NameSnapshot = playerName)
         } else {
             target.copy(player2Id = playerId, player2NameSnapshot = playerName)
+        }
+    }
+
+    private suspend fun rebuildEloRatings() {
+        val players = dao.getAllPlayersForBackup()
+        if (players.isEmpty()) return
+        val ratings = EloRating.recalculate(players.map { it.id }, dao.getAllMatchesForBackup())
+        players.forEach { player ->
+            val rating = ratings[player.id] ?: EloRating.INITIAL_RATING
+            if (player.eloRating != rating) dao.updatePlayer(player.copy(eloRating = rating))
         }
     }
 

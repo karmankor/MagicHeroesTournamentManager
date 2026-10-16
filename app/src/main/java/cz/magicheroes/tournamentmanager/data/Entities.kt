@@ -18,6 +18,7 @@ data class PlayerEntity(
     val name: String,
     val clanId: Long? = null,
     val isArchived: Boolean = false,
+    @ColumnInfo(defaultValue = "1000") val eloRating: Int = 1000,
     val createdAt: Long = System.currentTimeMillis()
 )
 

@@ -34,27 +34,13 @@ object BracketEngine {
             "Jeden hráč nemůže být v turnaji dvakrát."
         }
 
-        // For a two-player event the sole game is the final. For larger events use a
-        // deterministic two-loss bracket padded to the next power of two. Empty opening
-        // slots are WAITING, never auto-completed: any no-match advance must be confirmed.
-        if (entrants.size == 2) {
-            return listOf(
-                MatchEntity(
-                    tournamentId = tournamentId,
-                    matchNumber = 1,
-                    matchKey = "G",
-                    roundNumber = 1,
-                    branch = "FINAL",
-                    player1Id = entrants[0].playerId,
-                    player1NameSnapshot = entrants[0].name,
-                    player2Id = entrants[1].playerId,
-                    player2NameSnapshot = entrants[1].name,
-                    isTournamentFinal = true
-                )
-            )
+        // Reserve opening slots before the first result: small 8, medium 16, large 32.
+        // A late participant can then fill a waiting slot without rebuilding the graph.
+        val size = when {
+            entrants.size <= 8 -> 8
+            entrants.size <= 16 -> 16
+            else -> 32
         }
-
-        val size = nextPowerOfTwo(entrants.size)
         val winnersRoundCount = log2(size.toDouble()).toInt()
         val nodes = mutableListOf<Blueprint>()
         val winnersByRound = mutableMapOf<Int, List<Blueprint>>()

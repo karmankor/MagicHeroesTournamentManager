@@ -36,6 +36,21 @@ class BracketEngineTest {
         assertTrue(matches.all { it.nextLoserMatchNumber == null || matches.any { m -> m.matchNumber == it.nextLoserMatchNumber } })
     }
 
+    @Test fun bracketsUsePreparedSmallMediumAndLargeCapacities() {
+        val small = BracketEngine.createPlan(20, entrants(2))
+        assertEquals(14, small.size)
+        assertEquals(4, small.count { it.branch == "WINNERS" && it.roundNumber == 1 })
+        assertEquals(3, small.count { it.branch == "WINNERS" && it.roundNumber == 1 && it.player2Id == null })
+
+        val medium = BracketEngine.createPlan(21, entrants(9))
+        assertEquals(30, medium.size)
+        assertEquals(8, medium.count { it.branch == "WINNERS" && it.roundNumber == 1 })
+
+        val large = BracketEngine.createPlan(22, entrants(17))
+        assertEquals(62, large.size)
+        assertEquals(16, large.count { it.branch == "WINNERS" && it.roundNumber == 1 })
+    }
+
     @Test fun duplicatePlayerIdsAreRejected() {
         val list = listOf(Entrant(1, "A", null, null), Entrant(1, "A2", null, null))
         try {

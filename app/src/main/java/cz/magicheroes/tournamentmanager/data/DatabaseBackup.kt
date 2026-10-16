@@ -156,7 +156,7 @@ object DatabaseBackup {
         .put("id", id).put("name", name).put("createdAt", createdAt)
     private fun PlayerEntity.toJson() = JSONObject()
         .put("id", id).put("name", name).putLongOrNull("clanId", clanId)
-        .put("isArchived", isArchived).put("createdAt", createdAt)
+        .put("isArchived", isArchived).put("eloRating", eloRating).put("createdAt", createdAt)
     private fun TournamentEntity.toJson() = JSONObject()
         .put("id", id).put("name", name).put("dateIso", dateIso).put("note", note).put("status", status)
         .putLongOrNull("winnerId", winnerId).put("createdAt", createdAt).putLongOrNull("finishedAt", finishedAt)
@@ -181,7 +181,7 @@ object DatabaseBackup {
     private fun JSONObject.toClan() = ClanEntity(getLong("id"), getString("name"), getLong("createdAt"))
     private fun JSONObject.toPlayer() = PlayerEntity(
         id = getLong("id"), name = getString("name"), clanId = longOrNull("clanId"),
-        isArchived = getBoolean("isArchived"), createdAt = getLong("createdAt")
+        isArchived = getBoolean("isArchived"), eloRating = optInt("eloRating", 1000), createdAt = getLong("createdAt")
     )
     private fun JSONObject.toTournament() = TournamentEntity(
         id = getLong("id"), name = getString("name"), dateIso = getString("dateIso"), note = getString("note"),
