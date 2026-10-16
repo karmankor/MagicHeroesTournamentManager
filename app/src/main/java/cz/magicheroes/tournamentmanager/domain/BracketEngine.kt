@@ -65,7 +65,7 @@ object BracketEngine {
         for (round in 1..lowerRoundCount) {
             val count = when {
                 round == lowerRoundCount -> 1
-                else -> size shr ((round + 1) / 2)
+                else -> size shr ((round + 2) / 2)
             }
             val row = (0 until count).map { index ->
                 Blueprint("L${round}_${index}", round, "LOSERS")
