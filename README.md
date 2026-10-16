@@ -10,6 +10,7 @@ Nativní aplikace pro Android v Kotlinu, Jetpack Compose a Room. Data zůstávaj
 - předem sestavený graf vítězné a poraženecké větve, detail zápasu a potvrzení/opravování výsledků;
 - +2 body za odehranou výhru a +10 bonusových bodů navíc za výhru ve finále;
 - statistiky, série, žebříčky hráčů/klanů a historie;
+- plánované rozšíření: ELO od 1000 bodů, přepočet podle skutečných výsledků a ruční úpravy úvodních dvojic s bezpečným přepočtem návazných zápasů;
 - offline PDF export turnaje, hráče a žebříčků přes systémový dialog pro uložení souboru;
 - záloha celé lokální databáze do JSON a obnova ze souboru; obnovení nejprve ověří zálohu a přepisuje data v jediné databázové transakci;
 - jednotkové testy bodování a plánu bracketu.
