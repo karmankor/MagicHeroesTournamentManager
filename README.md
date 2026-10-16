@@ -12,6 +12,7 @@ Nativní aplikace pro Android v Kotlinu, Jetpack Compose a Room. Data zůstávaj
 - statistiky, série, žebříčky hráčů/klanů a historie;
 - ELO hodnocení od 1000 bodů (K = 32) a samostatný ELO žebříček podle skutečných vzájemných výsledků;
 - ruční úprava úvodních dvojic s potvrzením; změněné návazné výsledky, turnajové body a ELO se bezpečně přepočítají;
+- bezpečné odstoupení hráče: jeho odehrané zápasy zůstanou zachované a volné místo se uvolní bez posunutí ostatních dvojic;
 - offline PDF export turnaje, hráče a žebříčků přes systémový dialog pro uložení souboru;
 - záloha celé lokální databáze do JSON a obnova ze souboru; obnovení nejprve ověří zálohu a přepisuje data v jediné databázové transakci;
 - jednotkové testy bodování a plánu bracketu.
@@ -19,6 +20,8 @@ Nativní aplikace pro Android v Kotlinu, Jetpack Compose a Room. Data zůstávaj
 ## Pravidla bracketu
 
 Implementovaným výchozím modelem je **double elimination** (hráč vypadne po druhé prohře) pro 2–32 hráčů. Velikost pavouka se vybere podle počtu účastníků: malý pro 2–8 hráčů (8 míst), střední pro 9–16 hráčů (16 míst) a velký pro 17–32 hráčů (32 míst). Celá kapacita je připravená od začátku, včetně volných úvodních pozic pro pozdější hráče. Účastníci se párují podle pořadí ve výběru: první s druhým, třetí se čtvrtým atd. Návazné zápasy jsou definované dopředu. Vítěz pokračuje vítěznou větví, poražený přechází do odpovídající pozice poraženecké větve. Druhá prohra v poraženecké větvi už dál nenavazuje.
+
+Odstoupení hráče ponechá jeho seed jako volné místo; dokončené zápasy zůstanou v historii a odstoupivší hráč už nebude postupovat do dalších kol.
 
 Zápas s jedním hráčem se **nevyhodnotí automaticky**. Pořadatel musí výslovně potvrdit postup bez zápasu; tento postup neposkytuje body za výhru. Bracket je přepočítáván po výsledku i po opravě a starý výsledek navazujícího zápasu se zahodí, pokud se změní jeho hráči. V ruční úpravě úvodních dvojic lze vyměnit hráče z různých zápasů; změna vyžaduje potvrzení, následné výsledky se zachovají pouze tehdy, pokud se obsazení zápasu nezměnilo.
 

@@ -933,8 +933,8 @@ private fun ManualSwapDialog(
 ) {
     val thisOpeningIndex = match.matchKey.removePrefix("W1_").toIntOrNull() ?: -1
     val thisMatchIds = listOfNotNull(match.player1Id, match.player2Id).toSet()
-    val replacementOptions = participants.filterIndexed { index, candidate ->
-        candidate.playerId !in thisMatchIds && index / 2 != thisOpeningIndex
+    val replacementOptions = participants.filter { candidate ->
+        candidate.playerId !in thisMatchIds && (candidate.seed - 1) / 2 != thisOpeningIndex
     }
     var movingPlayerId by remember(match.matchNumber) {
         mutableStateOf(match.player1Id ?: match.player2Id ?: 0L)
@@ -1299,7 +1299,14 @@ private fun buildTournamentPdf(tournament: TournamentEntity, participants: List<
     add("Stav: ${tournament.status}")
     if (tournament.note.isNotBlank()) { add("Poznámka: ${tournament.note}"); add("") }
     add("ÚČASTNÍCI")
-    participants.sortedBy { it.seed }.forEach { add("${if (it.isQueued) "ČEKÁ ${it.seed}. " else "${it.seed}. "}${it.playerNameSnapshot} — ${it.clanNameSnapshot ?: "Bez klanu"}") }
+    participants.sortedBy { it.seed }.forEach {
+        val status = when {
+            it.isWithdrawn -> "ODSTOUPIL "
+            it.isQueued -> "ČEKÁ ${it.seed}. "
+            else -> "${it.seed}. "
+        }
+        add("$status${it.playerNameSnapshot} — ${it.clanNameSnapshot ?: "Bez klanu"}")
+    }
     add("")
     add("ZÁPASY")
     matches.forEach { m ->

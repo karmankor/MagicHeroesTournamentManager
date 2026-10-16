@@ -11,3 +11,4 @@
 9. Finále je v tomto výchozím modelu jednoduché, bez opakovaného resetovacího finále. Změnu tohoto pravidla je potřeba doplnit do plánu grafu a jeho testů.
 10. Pořadatel může vyměnit hráče mezi dvěma různými úvodními dvojicemi. Změna vyžaduje potvrzení; výsledky zápasů, ve kterých se účastníci změnili, jsou zrušeny a výsledky bodování i ELO se znovu přepočítají.
 11. ELO začíná na 1000, používá K = 32 a vychází ze skutečně odehraných zápasů seřazených podle času. Výsledek bez zápasu rating nemění. Po opravě zápasu se ratingy všech hráčů přehrají z platné historie.
+12. Odstoupení zruší pouze budoucí postup hráče. Již odehraný zápas, který obsahuje odstoupivšího hráče, zůstává platný. Neodehraná pozice zůstane prázdná a ostatní seedované pozice se neposouvají.
