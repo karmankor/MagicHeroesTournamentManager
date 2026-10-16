@@ -242,7 +242,13 @@ class TournamentRepository(private val database: AppDatabase) {
             require((if (slot == 0) target.player2Id else target.player1Id) != playerId) {
                 "Stejný hráč nemůže být v jednom zápase v obou pozicích."
             }
-            if (participant.isQueued) dao.updateParticipant(participant.copy(isQueued = false, isWithdrawn = false))
+            val openingCapacity = matches.count { it.branch == "WINNERS" && it.roundNumber == 1 } * 2
+            when {
+                locked && participant.isQueued ->
+                    dao.updateParticipant(participant.copy(isQueued = false, isWithdrawn = false))
+                !locked && participant.seed > openingCapacity && !participant.isQueued ->
+                    dao.updateParticipant(participant.copy(isQueued = true))
+            }
         }
 
         // Keep manual pins on finished matches for history; clear a pending pin if the same
