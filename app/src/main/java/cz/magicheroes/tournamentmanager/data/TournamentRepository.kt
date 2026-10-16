@@ -107,6 +107,45 @@ class TournamentRepository(private val database: AppDatabase) {
         tournamentId
     }
 
+    suspend fun addPlayerToWaitlist(tournamentId: Long, playerId: Long) = database.withTransaction {
+        val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
+        require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Do čekací fronty lze přidávat jen během aktivního turnaje." }
+        val player = dao.getPlayer(playerId) ?: error("Hráč už neexistuje.")
+        require(!player.isArchived) { "Archivovaného hráče nelze přidat do turnaje." }
+        val participants = dao.getParticipants(tournamentId)
+        require(participants.none { it.playerId == playerId }) { "Hráč už je účastníkem nebo čeká ve frontě." }
+        val activeTournamentIds = dao.getTournaments().filter { it.status == TournamentEntity.STATUS_ACTIVE }.map { it.id }
+        val alreadyPlaying = activeTournamentIds.any { id -> dao.getParticipants(id).any { it.playerId == playerId } }
+        require(!alreadyPlaying) { "Hráč už je přihlášený do jiného aktivního turnaje." }
+        val clan = player.clanId?.let { dao.getClan(it) }
+        dao.insertParticipants(listOf(TournamentParticipantEntity(
+            tournamentId = tournamentId,
+            playerId = player.id,
+            playerNameSnapshot = player.name,
+            clanIdSnapshot = clan?.id,
+            clanNameSnapshot = clan?.name,
+            seed = (participants.maxOfOrNull { it.seed } ?: 0) + 1,
+            isQueued = true
+        )))
+    }
+
+    suspend fun createPlayerInWaitlist(tournamentId: Long, name: String) = database.withTransaction {
+        val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
+        require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Do čekací fronty lze přidávat jen během aktivního turnaje." }
+        val clean = name.trim()
+        require(clean.isNotEmpty()) { "Zadej jméno hráče." }
+        require(clean.length <= 60) { "Jméno může mít nejvýše 60 znaků." }
+        val playerId = dao.insertPlayer(PlayerEntity(name = clean))
+        val participants = dao.getParticipants(tournamentId)
+        dao.insertParticipants(listOf(TournamentParticipantEntity(
+            tournamentId = tournamentId,
+            playerId = playerId,
+            playerNameSnapshot = clean,
+            seed = (participants.maxOfOrNull { it.seed } ?: 0) + 1,
+            isQueued = true
+        )))
+    }
+
     suspend fun setMatchInProgress(tournamentId: Long, matchNumber: Int) = database.withTransaction {
         val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
         require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Tento turnaj už není aktivní." }
