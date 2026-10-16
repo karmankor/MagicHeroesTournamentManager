@@ -8,6 +8,7 @@ import androidx.room.withTransaction
 import cz.magicheroes.tournamentmanager.data.AppDatabase
 import cz.magicheroes.tournamentmanager.data.DatabaseBackup
 import cz.magicheroes.tournamentmanager.data.ClanEntity
+import cz.magicheroes.tournamentmanager.data.ClanPointAdjustmentEntity
 import cz.magicheroes.tournamentmanager.data.MatchEntity
 import cz.magicheroes.tournamentmanager.data.PlayerEntity
 import cz.magicheroes.tournamentmanager.data.PointTransactionEntity
@@ -51,6 +52,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val points: StateFlow<List<PointTransactionEntity>> = dao.observeAllPointTransactions()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val clanPointAdjustments: StateFlow<List<ClanPointAdjustmentEntity>> = dao.observeClanPointAdjustments()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val selectedTournamentId = MutableStateFlow<Long?>(null)
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -78,6 +81,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun archivePlayer(id: Long) = perform("Hráč byl archivován; historie zůstala zachována.") { repository.archivePlayer(id) }
     fun addClan(name: String) = perform("Klan byl vytvořen.") { repository.addClan(name) }
     fun updateClan(id: Long, name: String) = perform("Klan byl přejmenován.") { repository.updateClan(id, name) }
+    fun adjustClanPoints(id: Long, delta: Int, reason: String) =
+        perform("Ruční úprava bodů klanu byla uložena.") { repository.adjustClanPoints(id, delta, reason) }
     fun deleteClan(id: Long) = perform("Klan byl odstraněn. Historické výsledky zůstaly zachovány.") { repository.deleteClan(id) }
 
     fun createTournament(name: String, dateIso: String, note: String, playerIds: List<Long>, onCreated: (Long) -> Unit = {}) =
@@ -101,6 +106,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun swapOpeningEntrants(tournamentId: Long, firstPlayerId: Long, secondPlayerId: Long, confirmed: Boolean) =
         perform("Úvodní dvojice byly upraveny; platné výsledky, body a ELO byly přepočítány.") {
             repository.swapOpeningEntrants(tournamentId, firstPlayerId, secondPlayerId, confirmed)
+        }
+
+    fun setManualMatchSlot(tournamentId: Long, matchNumber: Int, slot: Int, playerId: Long?, locked: Boolean) =
+        perform("Obsazení pozice bylo upraveno a návaznosti přepočítány.") {
+            repository.setManualMatchSlot(tournamentId, matchNumber, slot, playerId, locked)
         }
 
     fun withdrawPlayer(tournamentId: Long, playerId: Long) =

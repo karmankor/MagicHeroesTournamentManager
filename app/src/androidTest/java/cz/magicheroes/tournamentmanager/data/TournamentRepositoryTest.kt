@@ -83,7 +83,10 @@ class TournamentRepositoryTest {
         val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
         assertEquals(14, matches.size)
         assertEquals(ids[0], matches.getValue("W1_0").winnerId)
-        assertEquals(ids[2], matches.getValue("W1_1").player1Id)
+        // The defeated player stays in the nearest free winner-branch seat; the waitlisted
+        // entrant fills the opponent's side of that now-active match.
+        assertEquals(ids[1], matches.getValue("W1_1").player1Id)
+        assertEquals(ids[2], matches.getValue("W1_1").player2Id)
     }
 
     @Test
@@ -166,16 +169,70 @@ class TournamentRepositoryTest {
         repository.recordWinner(tournamentId, matchNumbers.getValue("W1_0"), ids[0])
         repository.recordWinner(tournamentId, matchNumbers.getValue("W1_1"), ids[2])
         repository.recordWinner(tournamentId, matchNumbers.getValue("W2_0"), ids[0])
-        repository.recordWinner(tournamentId, matchNumbers.getValue("L1_0"), ids[1])
-        repository.recordWinner(tournamentId, matchNumbers.getValue("L2_0"), ids[1])
-        assertEquals(ids[1], database.tournamentDao().getMatches(tournamentId).first { it.matchKey == "L2_0" }.winnerId)
+        repository.recordWinner(tournamentId, matchNumbers.getValue("W1_2"), ids[1])
+        assertEquals(ids[1], database.tournamentDao().getMatches(tournamentId).first { it.matchKey == "W1_2" }.winnerId)
 
-        // The first round correction changes both semifinals' participants. Old results must not survive.
+        // Correcting an opening result changes downstream seats; invalid dependent results must clear.
         repository.recordWinner(tournamentId, matchNumbers.getValue("W1_0"), ids[1])
         val corrected = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
         org.junit.Assert.assertNull(corrected.getValue("W2_0").winnerId)
-        org.junit.Assert.assertNull(corrected.getValue("L1_0").winnerId)
-        org.junit.Assert.assertNull(corrected.getValue("L2_0").winnerId)
+        org.junit.Assert.assertNull(corrected.getValue("W1_2").winnerId)
+    }
+
+
+    @Test
+    fun loserUsesAnOpenWinnersBranchSlotBeforeLosersBranch() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Volná vítězná pozice", "2026-10-16", "", ids)
+        val before = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+
+        repository.recordWinner(tournamentId, before.getValue("W1_0").matchNumber, ids[0])
+
+        val after = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(ids[1], after.getValue("W1_2").player1Id)
+        assertEquals(null, after.getValue("L1_0").player1Id)
+        assertEquals(after.getValue("W1_2").matchNumber, after.getValue("W1_0").routedLoserMatchNumber)
+    }
+
+    @Test
+    fun loserInLosersBranchUsesAnotherFreeLosersSlot() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Volné místo v poraženecké větvi", "2026-10-16", "", ids)
+        val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        val lowerMatch = matches.getValue("L1_0")
+
+        repository.setManualMatchSlot(tournamentId, lowerMatch.matchNumber, 0, ids[0], true)
+        repository.setManualMatchSlot(tournamentId, lowerMatch.matchNumber, 1, ids[1], true)
+        repository.recordWinner(tournamentId, lowerMatch.matchNumber, ids[0])
+
+        val after = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(ids[1], after.getValue("L1_1").player1Id)
+        assertEquals(after.getValue("L1_1").matchNumber, after.getValue("L1_0").routedLoserMatchNumber)
+    }
+
+    @Test
+    fun manualSlotAndClanPointAdjustmentsAreSaved() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        repository.addClan("Ravens")
+        val clan = database.tournamentDao().getClans().single()
+        repository.adjustClanPoints(clan.id, 12, "Bonus")
+        repository.adjustClanPoints(clan.id, -5, "Oprava")
+        assertEquals(7, database.tournamentDao().getAllClanPointAdjustmentsForBackup().sumOf { it.points })
+
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Ruční pole", "2026-10-16", "", ids)
+        val all = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        val target = all.getValue("W1_2")
+
+        repository.setManualMatchSlot(tournamentId, target.matchNumber, 0, ids[3], true)
+
+        val after = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(ids[3], after.getValue("W1_2").player1Id)
+        assertEquals(null, after.getValue("W1_1").player2Id)
+        assertEquals(ids[3], after.getValue("W1_2").manualPlayer1Id)
+        assertTrue(after.getValue("W1_2").manualPlayer1Locked)
     }
 
 }

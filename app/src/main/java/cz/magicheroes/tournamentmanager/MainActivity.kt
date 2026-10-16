@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cz.magicheroes.tournamentmanager.data.ClanEntity
+import cz.magicheroes.tournamentmanager.data.ClanPointAdjustmentEntity
 import cz.magicheroes.tournamentmanager.data.MatchEntity
 import cz.magicheroes.tournamentmanager.data.PlayerEntity
 import cz.magicheroes.tournamentmanager.data.PointTransactionEntity
@@ -134,6 +135,7 @@ private fun MagicHeroesApp(vm: MainViewModel) {
     val allMatches by vm.allMatches.collectAsState()
     val allParticipants by vm.allParticipants.collectAsState()
     val points by vm.points.collectAsState()
+    val clanPointAdjustments by vm.clanPointAdjustments.collectAsState()
     val selectedMatches by vm.selectedMatches.collectAsState()
     val selectedParticipants by vm.selectedParticipants.collectAsState()
     val message by vm.message.collectAsState()
@@ -144,6 +146,7 @@ private fun MagicHeroesApp(vm: MainViewModel) {
     var showAddPlayer by remember { mutableStateOf(false) }
     var showAddClan by remember { mutableStateOf(false) }
     var editClan by remember { mutableStateOf<ClanEntity?>(null) }
+    var adjustClanPointsFor by remember { mutableStateOf<ClanEntity?>(null) }
     var deletePlayerConfirm by remember { mutableStateOf<PlayerEntity?>(null) }
     var deleteClanConfirm by remember { mutableStateOf<ClanEntity?>(null) }
     var showCreateTournament by remember { mutableStateOf(false) }
@@ -226,6 +229,9 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                     onWinner = { matchNumber, winnerId -> vm.recordWinner(activeTournament.id, matchNumber, winnerId) },
                     onAdvance = { vm.advanceWithoutMatch(activeTournament.id, it) },
                     onSwapEntrants = { first, second, confirmed -> vm.swapOpeningEntrants(activeTournament.id, first, second, confirmed) },
+                    onSetManualSlot = { matchNumber, slot, playerId, locked ->
+                        vm.setManualMatchSlot(activeTournament.id, matchNumber, slot, playerId, locked)
+                    },
                     onWithdrawPlayer = { playerId -> vm.withdrawPlayer(activeTournament.id, playerId) },
                     onFinish = { vm.finishTournament(activeTournament.id) },
                     onExport = {
@@ -261,9 +267,11 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                         players = players,
                         stats = stats,
                         points = points,
+                        adjustments = clanPointAdjustments,
                         onAdd = { showAddClan = true },
                         onOpen = { selectedClanProfile = it.id },
                         onEdit = { editClan = it },
+                        onAdjustPoints = { adjustClanPointsFor = it },
                         onDelete = { deleteClanConfirm = it }
                     )
                     Page.TOURNAMENTS -> TournamentsScreen(
@@ -279,10 +287,11 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                         stats = stats,
                         clans = clans,
                         points = points,
+                        clanAdjustments = clanPointAdjustments,
                         matches = allMatches,
                         onProfile = { selectedPlayerProfile = it.id },
                         onExportPlayers = { startPdf(PdfRequest("magic-heroes-zebricek-hracu.pdf", "Magic Heroes — žebříček hráčů", buildLeaderboardPdf(stats, clanMap))) },
-                        onExportClans = { startPdf(PdfRequest("magic-heroes-zebricek-klanu.pdf", "Magic Heroes — žebříček klanů", buildClanLeaderboardPdf(clans, players, points, stats))) }
+                        onExportClans = { startPdf(PdfRequest("magic-heroes-zebricek-klanu.pdf", "Magic Heroes — žebříček klanů", buildClanLeaderboardPdf(clans, players, points, clanPointAdjustments, stats))) }
                     )
                     Page.HISTORY -> HistoryScreen(
                         tournaments = tournaments.filter { it.status == TournamentEntity.STATUS_FINISHED },
@@ -368,8 +377,19 @@ private fun MagicHeroesApp(vm: MainViewModel) {
     selectedClanProfile?.let { id ->
         clans.firstOrNull { it.id == id }?.let { clan -> ClanProfileDialog(
             clan = clan, players = players.filter { it.clanId == id }, stats = stats,
-            points = points, onDismiss = { selectedClanProfile = null }
+            points = points, adjustments = clanPointAdjustments, onDismiss = { selectedClanProfile = null }
         ) }
+    }
+
+    adjustClanPointsFor?.let { clan ->
+        ClanPointsDialog(
+            clan = clan,
+            onDismiss = { adjustClanPointsFor = null },
+            onSubmit = { delta, reason ->
+                vm.adjustClanPoints(clan.id, delta, reason)
+                adjustClanPointsFor = null
+            }
+        )
     }
 
     message?.let { text ->
@@ -407,7 +427,7 @@ private fun HomeScreen(
         HomeAction("▤  Historie turnajů", "$tournamentCount uložených turnajů", onHistory)
         Divider(color = Color(0xFF393142))
         Text("ZÁLOHA DAT", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
-        Text("Záloha obsahuje hráče, klany, turnaje, bracket i bodové záznamy.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Záloha obsahuje hráče, klany, turnaje, pavouk i ruční úpravy bodů.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onBackup, modifier = Modifier.weight(1f)) { Text("Exportovat zálohu") }
             OutlinedButton(onClick = onRestore, modifier = Modifier.weight(1f)) { Text("Obnovit zálohu") }
@@ -485,7 +505,9 @@ private fun PlayersScreen(
 @Composable
 private fun ClansScreen(
     clans: List<ClanEntity>, players: List<PlayerEntity>, stats: List<PlayerStats>, points: List<PointTransactionEntity>,
-    onAdd: () -> Unit, onOpen: (ClanEntity) -> Unit, onEdit: (ClanEntity) -> Unit, onDelete: (ClanEntity) -> Unit
+    adjustments: List<ClanPointAdjustmentEntity>,
+    onAdd: () -> Unit, onOpen: (ClanEntity) -> Unit, onEdit: (ClanEntity) -> Unit,
+    onAdjustPoints: (ClanEntity) -> Unit, onDelete: (ClanEntity) -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -496,7 +518,8 @@ private fun ClansScreen(
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
             items(clans, key = { it.id }) { clan ->
                 val members = players.filter { it.clanId == clan.id }
-                val clanPoints = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
+                val clanPoints = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points } +
+                    adjustments.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, Color(0xFF393142))) {
                     Column(Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -508,6 +531,9 @@ private fun ClansScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             TextButton(onClick = { onOpen(clan) }) { Text("Detail") }
                             TextButton(onClick = { onEdit(clan) }) { Text("Přejmenovat") }
+                            TextButton(onClick = { onAdjustPoints(clan) }) { Text("Body ±") }
+                        }
+                        Row {
                             TextButton(onClick = { onDelete(clan) }) { Text("Odstranit", color = MaterialTheme.colorScheme.error) }
                         }
                     }
@@ -572,7 +598,8 @@ private fun HistoryScreen(
 
 @Composable
 private fun LeaderboardScreen(
-    stats: List<PlayerStats>, clans: List<ClanEntity>, points: List<PointTransactionEntity>, matches: List<MatchEntity>,
+    stats: List<PlayerStats>, clans: List<ClanEntity>, points: List<PointTransactionEntity>,
+    clanAdjustments: List<ClanPointAdjustmentEntity>, matches: List<MatchEntity>,
     onProfile: (PlayerEntity) -> Unit, onExportPlayers: () -> Unit, onExportClans: () -> Unit
 ) {
     var mode by remember { mutableStateOf(false) }
@@ -619,7 +646,8 @@ private fun LeaderboardScreen(
             OutlinedButton(onClick = onExportPlayers, modifier = Modifier.fillMaxWidth()) { Text("Export žebříčku hráčů do PDF") }
         } else {
             val clanRanking = clans.map { clan ->
-                val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
+                val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points } +
+                    clanAdjustments.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
                 val members = stats.filter { it.player.clanId == clan.id }
                 Triple(clan, score, members)
             }.sortedByDescending { it.second }
@@ -647,11 +675,13 @@ private fun TournamentDetailScreen(
     playerName: (Long) -> String, playerElo: (Long) -> Int, points: List<PointTransactionEntity>,
     onBack: () -> Unit, onAddExistingPlayer: (Long) -> Unit, onAddNewPlayer: (String) -> Unit, onPromoteNext: () -> Unit,
     onStartMatch: (Int) -> Unit, onWinner: (Int, Long) -> Unit, onAdvance: (Int) -> Unit,
-    onSwapEntrants: (Long, Long, Boolean) -> Unit, onWithdrawPlayer: (Long) -> Unit,
-    onFinish: () -> Unit, onExport: () -> Unit
+    onSwapEntrants: (Long, Long, Boolean) -> Unit,
+    onSetManualSlot: (Int, Int, Long?, Boolean) -> Unit,
+    onWithdrawPlayer: (Long) -> Unit, onFinish: () -> Unit, onExport: () -> Unit
 ) {
     var matchToEdit by remember { mutableStateOf<MatchEntity?>(null) }
     var matchToSwap by remember { mutableStateOf<MatchEntity?>(null) }
+    var matchToManualSlots by remember { mutableStateOf<MatchEntity?>(null) }
     var participantToWithdraw by remember { mutableStateOf<Long?>(null) }
     var showFinishConfirm by remember { mutableStateOf(false) }
     var showWaitlistDialog by remember { mutableStateOf(false) }
@@ -798,8 +828,21 @@ private fun TournamentDetailScreen(
         onConfirmWinner = { winnerId -> onWinner(match.matchNumber, winnerId); matchToEdit = null },
         onAdvance = { onAdvance(match.matchNumber); matchToEdit = null },
         canEditPairing = match.branch == "WINNERS" && match.roundNumber == 1 && match.player1Id != null && match.player2Id != null,
-        onEditPairing = { matchToEdit = null; matchToSwap = match }
+        onEditPairing = { matchToEdit = null; matchToSwap = match },
+        canEditSlots = tournament.status == TournamentEntity.STATUS_ACTIVE && match.winnerId == null && match.status != "IN_PROGRESS",
+        onEditSlots = { matchToEdit = null; matchToManualSlots = match }
     )
+    }
+    matchToManualSlots?.let { match ->
+        ManualSlotDialog(
+            match = match,
+            participants = participants.filterNot { it.isWithdrawn }.sortedBy { it.seed },
+            onDismiss = { matchToManualSlots = null },
+            onSave = { slot, playerId, locked ->
+                onSetManualSlot(match.matchNumber, slot, playerId, locked)
+                matchToManualSlots = null
+            }
+        )
     }
     matchToSwap?.let { match ->
         ManualSwapDialog(
@@ -861,23 +904,122 @@ private fun MatchCard(match: MatchEntity, playerName: (Long) -> String, playerEl
             Divider(color = Color(0xFF494151))
             Text(match.player2Id?.let { "${playerName(it)} · ELO ${playerElo(it)}" } ?: "Čeká na soupeře", maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (match.winnerId != null) Text("Vítěz: ${playerName(match.winnerId)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
-            if (match.nextWinnerMatchNumber != null) {
-                Text("↗ Vítěz → zápas ${match.nextWinnerMatchNumber}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val winnerDestination = if (match.winnerId != null) match.routedWinnerMatchNumber else match.nextWinnerMatchNumber
+            val loserDestination = if (match.winnerId != null) match.routedLoserMatchNumber else match.nextLoserMatchNumber
+            if (winnerDestination != null) {
+                Text("↗ Vítěz → zápas " + winnerDestination, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (match.nextLoserMatchNumber != null) {
-                Text("↘ Poražený → zápas ${match.nextLoserMatchNumber}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else if (match.branch == "LOSERS" && match.winnerId != null) {
-                Text("Poražený: vyřazen", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            if (loserDestination != null) {
+                Text("↘ Poražený → zápas " + loserDestination, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (match.winnerId != null && match.branch != "FINAL" && match.loserId != null) {
+                Text("Poražený: není volné místo", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
         }
     }
 }
 
 @Composable
+private fun ManualSlotDialog(
+    match: MatchEntity,
+    participants: List<TournamentParticipantEntity>,
+    onDismiss: () -> Unit,
+    onSave: (Int, Long?, Boolean) -> Unit
+) {
+    var selectedSlot by remember(match.matchNumber) { mutableStateOf(0) }
+    var slot1Player by remember(match.matchNumber) { mutableStateOf(match.manualPlayer1Id ?: match.player1Id) }
+    var slot2Player by remember(match.matchNumber) { mutableStateOf(match.manualPlayer2Id ?: match.player2Id) }
+    var slot1Locked by remember(match.matchNumber) { mutableStateOf(match.manualPlayer1Locked) }
+    var slot2Locked by remember(match.matchNumber) { mutableStateOf(match.manualPlayer2Locked) }
+    var playerMenu by remember { mutableStateOf(false) }
+
+    val selectedPlayer = if (selectedSlot == 0) slot1Player else slot2Player
+    val selectedLocked = if (selectedSlot == 0) slot1Locked else slot2Locked
+    val currentPlayer = if (selectedSlot == 0) match.player1Id else match.player2Id
+    val nameFor: (Long?) -> String = { id ->
+        id?.let { value -> participants.firstOrNull { it.playerId == value }?.playerNameSnapshot }
+            ?: "Volná pozice"
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ruční obsazení · zápas " + match.matchNumber) },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(columnTitle(match.branch, match.roundNumber), color = MaterialTheme.colorScheme.secondary)
+                Text("Vyber pozici a hráče. Ruční umístění má přednost před automatickým přesunem.")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (selectedSlot == 0) Button(onClick = { selectedSlot = 0 }) { Text("Pozice 1") }
+                    else OutlinedButton(onClick = { selectedSlot = 0 }) { Text("Pozice 1") }
+                    if (selectedSlot == 1) Button(onClick = { selectedSlot = 1 }) { Text("Pozice 2") }
+                    else OutlinedButton(onClick = { selectedSlot = 1 }) { Text("Pozice 2") }
+                }
+                Text("Aktuální obsazení: " + nameFor(currentPlayer))
+                OutlinedButton(onClick = { playerMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(nameFor(selectedPlayer))
+                }
+                DropdownMenu(expanded = playerMenu, onDismissRequest = { playerMenu = false }) {
+                    participants.forEach { participant ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(participant.playerNameSnapshot + if (participant.isQueued) " · čeká" else "")
+                            },
+                            onClick = {
+                                if (selectedSlot == 0) {
+                                    slot1Player = participant.playerId
+                                    slot1Locked = true
+                                } else {
+                                    slot2Player = participant.playerId
+                                    slot2Locked = true
+                                }
+                                playerMenu = false
+                            }
+                        )
+                    }
+                }
+                OutlinedButton(
+                    onClick = {
+                        if (selectedSlot == 0) {
+                            slot1Player = null
+                            slot1Locked = true
+                        } else {
+                            slot2Player = null
+                            slot2Locked = true
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Ponechat pozici prázdnou") }
+                TextButton(onClick = {
+                    if (selectedSlot == 0) {
+                        slot1Player = match.player1Id
+                        slot1Locked = false
+                    } else {
+                        slot2Player = match.player2Id
+                        slot2Locked = false
+                    }
+                }) { Text("Obnovit automatické umístění") }
+                if (selectedLocked) {
+                    Text("Pozice je ručně uzamčená.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onSave(selectedSlot, selectedPlayer, selectedLocked)
+            }) { Text("Uložit pozici") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
+    )
+}
+
+@Composable
 private fun MatchResultDialog(
     match: MatchEntity, playerName: (Long) -> String, isFinished: Boolean, onDismiss: () -> Unit, onStart: () -> Unit,
     onConfirmWinner: (Long) -> Unit, onAdvance: () -> Unit,
-    canEditPairing: Boolean, onEditPairing: () -> Unit
+    canEditPairing: Boolean, onEditPairing: () -> Unit,
+    canEditSlots: Boolean, onEditSlots: () -> Unit
 ) {
     var chosenWinner by remember(match.id, match.winnerId) { mutableStateOf(match.winnerId) }
     var confirmAdvance by remember { mutableStateOf(false) }
@@ -910,6 +1052,9 @@ private fun MatchResultDialog(
                 else if (one != null && confirmAdvance) Button(onClick = onAdvance) { Text("Ano, potvrdit postup") }
                 if (canEditPairing) {
                     TextButton(onClick = onEditPairing) { Text("Ruční úprava soupeře") }
+                }
+                if (canEditSlots) {
+                    TextButton(onClick = onEditSlots) { Text("Upravit libovolnou pozici") }
                 }
                 if (!isFinished && match.player1Id != null && match.player2Id != null && match.winnerId == null && match.status != "IN_PROGRESS") {
                     TextButton(onClick = onStart) { Text("Označit jako rozehraný") }
@@ -1195,24 +1340,83 @@ private fun PlayerProfileDialog(
 }
 
 @Composable
-private fun ClanProfileDialog(clan: ClanEntity, players: List<PlayerEntity>, stats: List<PlayerStats>, points: List<PointTransactionEntity>, onDismiss: () -> Unit) {
+private fun ClanProfileDialog(
+    clan: ClanEntity, players: List<PlayerEntity>, stats: List<PlayerStats>, points: List<PointTransactionEntity>,
+    adjustments: List<ClanPointAdjustmentEntity>, onDismiss: () -> Unit
+) {
     val members = stats.filter { it.player.clanId == clan.id }
     val wins = members.sumOf { it.wins }
     val losses = members.sumOf { it.losses }
-    val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
+    val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points } +
+        adjustments.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(clan.name, fontWeight = FontWeight.Bold) },
         text = {
             Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("${players.size} aktuálních členů")
-                Text("Historické body klanu: $score", color = MaterialTheme.colorScheme.secondary)
+                Text("Body klanu: $score", color = MaterialTheme.colorScheme.secondary)
                 Text("Výhry současných členů: $wins · prohry: $losses")
+                val manualAdjustments = adjustments.filter { it.clanIdSnapshot == clan.id }.sortedByDescending { it.createdAt }
+                if (manualAdjustments.isNotEmpty()) {
+                    Divider()
+                    Text("Ruční úpravy bodů", fontWeight = FontWeight.SemiBold)
+                    manualAdjustments.take(10).forEach { entry ->
+                        Text("${if (entry.points > 0) "+" else ""}${entry.points} b. · ${entry.reason}", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
                 Divider()
                 players.forEach { Text("• ${it.name}") }
             }
         },
         confirmButton = { Button(onClick = onDismiss) { Text("Zavřít") } }
+    )
+}
+
+@Composable
+private fun ClanPointsDialog(
+    clan: ClanEntity,
+    onDismiss: () -> Unit,
+    onSubmit: (Int, String) -> Unit
+) {
+    var amount by remember(clan.id) { mutableStateOf("1") }
+    var reason by remember(clan.id) { mutableStateOf("") }
+    val parsedAmount = amount.toIntOrNull()?.takeIf { it in 1..1_000_000 }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Upravit body · ${clan.name}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Přidání nebo odebrání bodů se uloží do historie a zachová se i po restartu.")
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { value -> amount = value.filter { it.isDigit() }.take(7) },
+                    label = { Text("Počet bodů") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = { reason = it.take(120) },
+                    label = { Text("Důvod (volitelné)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(
+                    enabled = parsedAmount != null,
+                    onClick = { parsedAmount?.let { onSubmit(it, reason) } }
+                ) { Text("+ Přidat") }
+                Button(
+                    enabled = parsedAmount != null,
+                    onClick = { parsedAmount?.let { onSubmit(-it, reason) } }
+                ) { Text("− Odebrat") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
     )
 }
 
@@ -1332,11 +1536,15 @@ private fun buildLeaderboardPdf(stats: List<PlayerStats>, clans: Map<Long, ClanE
     }
 }
 
-private fun buildClanLeaderboardPdf(clans: List<ClanEntity>, players: List<PlayerEntity>, points: List<PointTransactionEntity>, stats: List<PlayerStats>): List<String> = buildList {
-    add("Pozice | Klan | Body z historických výsledků | Aktivní členové | Výhry členů | Prohry členů")
+private fun buildClanLeaderboardPdf(
+    clans: List<ClanEntity>, players: List<PlayerEntity>, points: List<PointTransactionEntity>,
+    adjustments: List<ClanPointAdjustmentEntity>, stats: List<PlayerStats>
+): List<String> = buildList {
+    add("Pozice | Klan | Celkové body | Aktivní členové | Výhry členů | Prohry členů")
     clans.map { clan ->
         val memberStats = stats.filter { it.player.clanId == clan.id }
-        val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
+        val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points } +
+            adjustments.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points }
         Triple(clan, score, memberStats)
     }.sortedByDescending { it.second }.forEachIndexed { index, row ->
         add("${index + 1}. | ${row.first.name} | ${row.second} | ${players.count { it.clanId == row.first.id }} | ${row.third.sumOf { it.wins }} | ${row.third.sumOf { it.losses }}")

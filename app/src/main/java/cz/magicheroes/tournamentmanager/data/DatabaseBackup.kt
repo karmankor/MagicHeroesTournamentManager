@@ -24,7 +24,8 @@ object DatabaseBackup {
                 tournaments = dao.getAllTournamentsForBackup(),
                 participants = dao.getAllParticipantsForBackup(),
                 matches = dao.getAllMatchesForBackup(),
-                points = dao.getAllPointTransactionsForBackup()
+                points = dao.getAllPointTransactionsForBackup(),
+                clanPointAdjustments = dao.getAllClanPointAdjustmentsForBackup()
             )
         }
         val root = JSONObject()
@@ -37,6 +38,7 @@ object DatabaseBackup {
             .put("participants", JSONArray().apply { snapshot.participants.forEach { put(it.toJson()) } })
             .put("matches", JSONArray().apply { snapshot.matches.forEach { put(it.toJson()) } })
             .put("points", JSONArray().apply { snapshot.points.forEach { put(it.toJson()) } })
+            .put("clanPointAdjustments", JSONArray().apply { snapshot.clanPointAdjustments.forEach { put(it.toJson()) } })
         val bytes = root.toString(2).toByteArray(StandardCharsets.UTF_8)
         require(bytes.size <= MAX_BYTES) { "Záloha je příliš velká (limit je 25 MB)." }
         resolver.openOutputStream(uri, "wt").use { output ->
@@ -76,7 +78,8 @@ object DatabaseBackup {
                 tournaments = root.getJSONArray("tournaments").mapObjects { it.toTournament() },
                 participants = root.getJSONArray("participants").mapObjects { it.toParticipant() },
                 matches = root.getJSONArray("matches").mapObjects { it.toMatch() },
-                points = root.getJSONArray("points").mapObjects { it.toPoint() }
+                points = root.getJSONArray("points").mapObjects { it.toPoint() },
+                clanPointAdjustments = (root.optJSONArray("clanPointAdjustments") ?: JSONArray()).mapObjects { it.toClanPointAdjustment() }
             )
         } catch (error: Exception) {
             throw IllegalArgumentException("Záloha je poškozená nebo jí chybí potřebná data.", error)
@@ -86,6 +89,7 @@ object DatabaseBackup {
         val dao = database.tournamentDao()
         database.withTransaction {
             // No rows are removed until parsing and validation above have succeeded.
+            dao.clearClanPointAdjustments()
             dao.clearPointTransactions()
             dao.clearMatches()
             dao.clearParticipants()
@@ -98,6 +102,7 @@ object DatabaseBackup {
             if (snapshot.participants.isNotEmpty()) dao.restoreParticipants(snapshot.participants)
             if (snapshot.matches.isNotEmpty()) dao.restoreMatches(snapshot.matches)
             if (snapshot.points.isNotEmpty()) dao.restorePointTransactions(snapshot.points)
+            if (snapshot.clanPointAdjustments.isNotEmpty()) dao.restoreClanPointAdjustments(snapshot.clanPointAdjustments)
         }
     }
 
@@ -110,6 +115,10 @@ object DatabaseBackup {
         unique(s.tournaments.map { it.id }, "turnaje")
         unique(s.matches.map { it.id }, "zápasy")
         unique(s.points.map { it.id }, "body")
+        unique(s.clanPointAdjustments.map { it.id }, "ruční body klanů")
+        require(s.clanPointAdjustments.all { it.clanNameSnapshot.isNotBlank() && it.reason.isNotBlank() }) {
+            "Záloha obsahuje neplatnou ruční úpravu bodů klanu."
+        }
         require(s.clans.map { it.name }.distinct().size == s.clans.size) { "Záloha obsahuje duplicitní názvy klanů." }
         require(s.matches.map { it.tournamentId to it.matchNumber }.distinct().size == s.matches.size) { "Záloha obsahuje duplicitní čísla zápasů." }
         require(s.participants.map { it.tournamentId to it.playerId }.distinct().size == s.participants.size) { "Záloha obsahuje duplicitní účastníky turnaje." }
@@ -125,7 +134,7 @@ object DatabaseBackup {
         require(s.matches.all { it.tournamentId in tournamentIds }) { "Záloha obsahuje zápas bez turnaje." }
         require(s.matches.all { m ->
             val enrolled = participantsByTournament[m.tournamentId].orEmpty().map { it.playerId }.toSet()
-            listOfNotNull(m.player1Id, m.player2Id, m.selectedWinnerId, m.winnerId, m.loserId).all { it in enrolled }
+            listOfNotNull(m.player1Id, m.player2Id, m.selectedWinnerId, m.winnerId, m.loserId, m.manualPlayer1Id, m.manualPlayer2Id).all { it in enrolled }
         }) { "Záloha obsahuje zápas s hráčem, který nepatří do daného turnaje." }
         require(s.matches.all { m ->
             val ownNumbers = matchesByTournament[m.tournamentId].orEmpty().map { it.matchNumber }.toSet()
@@ -149,7 +158,8 @@ object DatabaseBackup {
         val tournaments: List<TournamentEntity>,
         val participants: List<TournamentParticipantEntity>,
         val matches: List<MatchEntity>,
-        val points: List<PointTransactionEntity>
+        val points: List<PointTransactionEntity>,
+        val clanPointAdjustments: List<ClanPointAdjustmentEntity>
     )
 
     private fun ClanEntity.toJson() = JSONObject()
@@ -172,6 +182,14 @@ object DatabaseBackup {
         .putIntOrNull("nextWinnerMatchNumber", nextWinnerMatchNumber).putIntOrNull("winnerTargetSlot", winnerTargetSlot)
         .putIntOrNull("nextLoserMatchNumber", nextLoserMatchNumber).putIntOrNull("loserTargetSlot", loserTargetSlot)
         .put("isTournamentFinal", isTournamentFinal).put("byeConfirmed", byeConfirmed).putLongOrNull("completedAt", completedAt)
+        .put("manualPlayer1Locked", manualPlayer1Locked).putLongOrNull("manualPlayer1Id", manualPlayer1Id)
+        .putLongOrNull("manualPlayer1AssignedAt", manualPlayer1AssignedAt)
+        .put("manualPlayer2Locked", manualPlayer2Locked).putLongOrNull("manualPlayer2Id", manualPlayer2Id)
+        .putLongOrNull("manualPlayer2AssignedAt", manualPlayer2AssignedAt)
+        .putIntOrNull("routedWinnerMatchNumber", routedWinnerMatchNumber).putIntOrNull("routedLoserMatchNumber", routedLoserMatchNumber)
+    private fun ClanPointAdjustmentEntity.toJson() = JSONObject()
+        .put("id", id).put("clanIdSnapshot", clanIdSnapshot).put("clanNameSnapshot", clanNameSnapshot)
+        .put("points", points).put("reason", reason).put("createdAt", createdAt)
     private fun PointTransactionEntity.toJson() = JSONObject()
         .put("id", id).put("playerId", playerId).put("tournamentId", tournamentId)
         .putLongOrNull("matchId", matchId).putIntOrNull("matchNumber", matchNumber).put("points", points)
@@ -201,7 +219,16 @@ object DatabaseBackup {
         selectedWinnerId = longOrNull("selectedWinnerId"), winnerId = longOrNull("winnerId"), loserId = longOrNull("loserId"),
         nextWinnerMatchNumber = intOrNull("nextWinnerMatchNumber"), winnerTargetSlot = intOrNull("winnerTargetSlot"),
         nextLoserMatchNumber = intOrNull("nextLoserMatchNumber"), loserTargetSlot = intOrNull("loserTargetSlot"),
-        isTournamentFinal = getBoolean("isTournamentFinal"), byeConfirmed = getBoolean("byeConfirmed"), completedAt = longOrNull("completedAt")
+        isTournamentFinal = getBoolean("isTournamentFinal"), byeConfirmed = getBoolean("byeConfirmed"), completedAt = longOrNull("completedAt"),
+        manualPlayer1Locked = optBoolean("manualPlayer1Locked", false), manualPlayer1Id = longOrNull("manualPlayer1Id"),
+        manualPlayer1AssignedAt = longOrNull("manualPlayer1AssignedAt"),
+        manualPlayer2Locked = optBoolean("manualPlayer2Locked", false), manualPlayer2Id = longOrNull("manualPlayer2Id"),
+        manualPlayer2AssignedAt = longOrNull("manualPlayer2AssignedAt"),
+        routedWinnerMatchNumber = intOrNull("routedWinnerMatchNumber"), routedLoserMatchNumber = intOrNull("routedLoserMatchNumber")
+    )
+    private fun JSONObject.toClanPointAdjustment() = ClanPointAdjustmentEntity(
+        id = getLong("id"), clanIdSnapshot = getLong("clanIdSnapshot"), clanNameSnapshot = getString("clanNameSnapshot"),
+        points = getInt("points"), reason = getString("reason"), createdAt = getLong("createdAt")
     )
     private fun JSONObject.toPoint() = PointTransactionEntity(
         id = getLong("id"), playerId = getLong("playerId"), tournamentId = getLong("tournamentId"),
