@@ -178,4 +178,43 @@ class TournamentRepositoryTest {
         org.junit.Assert.assertNull(corrected.getValue("L2_0").winnerId)
     }
 
+
+    @Test
+    fun loserUsesAnOpenWinnersBranchSlotBeforeLosersBranch() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Volná vítězná pozice", "2026-10-16", "", ids)
+        val before = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+
+        repository.recordWinner(tournamentId, before.getValue("W1_0").matchNumber, ids[0])
+
+        val after = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(ids[1], after.getValue("W1_2").player1Id)
+        assertEquals(null, after.getValue("L1_0").player1Id)
+        assertEquals(after.getValue("W1_2").matchNumber, after.getValue("W1_0").routedLoserMatchNumber)
+    }
+
+    @Test
+    fun manualSlotAndClanPointAdjustmentsAreSaved() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        repository.addClan("Ravens")
+        val clan = database.tournamentDao().getClans().single()
+        repository.adjustClanPoints(clan.id, 12, "Bonus")
+        repository.adjustClanPoints(clan.id, -5, "Oprava")
+        assertEquals(7, database.tournamentDao().getAllClanPointAdjustmentsForBackup().sumOf { it.points })
+
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Ruční pole", "2026-10-16", "", ids)
+        val all = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        val target = all.getValue("W1_2")
+
+        repository.setManualMatchSlot(tournamentId, target.matchNumber, 0, ids[3], true)
+
+        val after = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(ids[3], after.getValue("W1_2").player1Id)
+        assertEquals(null, after.getValue("W1_1").player2Id)
+        assertEquals(ids[3], after.getValue("W1_2").manualPlayer1Id)
+        assertTrue(after.getValue("W1_2").manualPlayer1Locked)
+    }
+
 }
