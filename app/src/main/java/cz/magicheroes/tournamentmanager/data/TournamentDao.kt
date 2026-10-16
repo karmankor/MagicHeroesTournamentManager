@@ -108,6 +108,9 @@ interface TournamentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun restoreParticipants(items: List<TournamentParticipantEntity>)
 
+    @Update
+    suspend fun updateParticipant(item: TournamentParticipantEntity)
+
     @Query("DELETE FROM tournament_participants")
     suspend fun clearParticipants()
 
