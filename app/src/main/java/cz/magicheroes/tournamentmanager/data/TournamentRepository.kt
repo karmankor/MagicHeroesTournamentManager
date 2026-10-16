@@ -291,6 +291,18 @@ class TournamentRepository(private val database: AppDatabase) {
         }
         require(!hasInProgressMatch) { "Nejprve dokonči nebo zruš právě rozehraný zápas." }
         dao.updateParticipant(participant.copy(isWithdrawn = true))
+        dao.getMatches(tournamentId)
+            .filter { it.winnerId == null && it.selectedWinnerId == null }
+            .forEach { match ->
+                var cleared = match
+                if (match.manualPlayer1Id == playerId) {
+                    cleared = cleared.copy(manualPlayer1Locked = false, manualPlayer1Id = null, manualPlayer1AssignedAt = null)
+                }
+                if (match.manualPlayer2Id == playerId) {
+                    cleared = cleared.copy(manualPlayer2Locked = false, manualPlayer2Id = null, manualPlayer2AssignedAt = null)
+                }
+                if (cleared != match) dao.updateMatch(cleared)
+            }
         rebuildBracket(tournamentId)
         rebuildPoints(tournamentId)
         rebuildEloRatings()
@@ -487,10 +499,14 @@ class TournamentRepository(private val database: AppDatabase) {
             )
             working[saved.matchNumber] = current
 
-            val winnerTarget = if (current.isTournamentFinal) null else routeOutcome(
+            val winnerTarget = if (
+                current.isTournamentFinal || participantById[winner]?.isWithdrawn == true
+            ) null else routeOutcome(
                 working, previousByNumber, latestManualByPlayer, current, winner, isLoser = false
             )
-            val loserTarget = if (loser == null || current.isTournamentFinal) null else routeOutcome(
+            val loserTarget = if (
+                loser == null || current.isTournamentFinal || participantById[loser]?.isWithdrawn == true
+            ) null else routeOutcome(
                 working, previousByNumber, latestManualByPlayer, current, loser, isLoser = true
             )
             working[saved.matchNumber] = working.getValue(saved.matchNumber).copy(
@@ -591,6 +607,7 @@ class TournamentRepository(private val database: AppDatabase) {
         branch: String,
         previousByNumber: Map<Int, MatchEntity>
     ): Int? {
+        val sourceOpponent = source.winnerId
         val candidates = map.values.asSequence()
             .filter { target ->
                 target.matchNumber != source.matchNumber &&
@@ -598,7 +615,8 @@ class TournamentRepository(private val database: AppDatabase) {
                     !target.isTournamentFinal &&
                     target.selectedWinnerId == null &&
                     target.winnerId == null &&
-                    target.status != "IN_PROGRESS"
+                    target.status != "IN_PROGRESS" &&
+                    (sourceOpponent == null || (target.player1Id != sourceOpponent && target.player2Id != sourceOpponent))
             }
             .flatMap { target -> sequenceOf(0, 1).map { slot -> target to slot } }
             .filter { (target, slot) ->
