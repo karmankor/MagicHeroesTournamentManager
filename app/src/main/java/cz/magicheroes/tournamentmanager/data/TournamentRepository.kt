@@ -562,26 +562,9 @@ class TournamentRepository(private val database: AppDatabase) {
             ) return manual.matchNumber
         }
 
-        val sourceTime = source.completedAt ?: Long.MAX_VALUE
-        val historicalTarget = previousByNumber.values.asSequence()
-            .filter { target ->
-                target.matchNumber != source.matchNumber &&
-                    target.selectedWinnerId != null &&
-                    target.completedAt != null &&
-                    target.completedAt > sourceTime &&
-                    (target.player1Id == playerId || target.player2Id == playerId)
-            }
-            .sortedWith(compareBy<MatchEntity> { it.completedAt ?: Long.MAX_VALUE }.thenBy { it.matchNumber })
-            .firstOrNull()
-        if (historicalTarget != null) {
-            val slot = if (historicalTarget.player1Id == playerId) 0 else 1
-            if (assignPlayerToSlot(
-                    map, historicalTarget.matchNumber, slot, playerId,
-                    if (slot == 0) historicalTarget.player1NameSnapshot else historicalTarget.player2NameSnapshot,
-                    allowRecordedResult = true
-                )
-            ) return historicalTarget.matchNumber
-        }
+        // Do not reuse an old dynamic destination merely because this player appeared there
+        // before. Replaying the current outcome decides the new route; a changed entrant then
+        // invalidates downstream results rather than preserving a now-impossible progression.
 
         if (!isLoser) {
             val targetNumber = source.nextWinnerMatchNumber
