@@ -165,7 +165,7 @@ class TournamentRepository(private val database: AppDatabase) {
         // players entering a downstream node, that node's old result must be invalidated even
         // when its previously selected winner happens to still be one of the new players.
         val previousByNumber = storedMatches.associateBy { it.matchNumber }
-        val participants = dao.getParticipants(tournamentId).sortedBy { it.seed }
+        val participants = dao.getParticipants(tournamentId).filterNot { it.isQueued }.sortedBy { it.seed }
         val participantById = participants.associateBy { it.playerId }
         val working = storedMatches.associate { it.matchNumber to it }.toMutableMap()
 
