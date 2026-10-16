@@ -162,7 +162,7 @@ object DatabaseBackup {
         .putLongOrNull("winnerId", winnerId).put("createdAt", createdAt).putLongOrNull("finishedAt", finishedAt)
     private fun TournamentParticipantEntity.toJson() = JSONObject()
         .put("tournamentId", tournamentId).put("playerId", playerId).put("playerNameSnapshot", playerNameSnapshot)
-        .putLongOrNull("clanIdSnapshot", clanIdSnapshot).putStringOrNull("clanNameSnapshot", clanNameSnapshot).put("seed", seed)
+        .putLongOrNull("clanIdSnapshot", clanIdSnapshot).putStringOrNull("clanNameSnapshot", clanNameSnapshot).put("seed", seed).put("isQueued", isQueued)
     private fun MatchEntity.toJson() = JSONObject()
         .put("id", id).put("tournamentId", tournamentId).put("matchNumber", matchNumber).put("matchKey", matchKey)
         .put("roundNumber", roundNumber).put("branch", branch).put("status", status)
@@ -191,7 +191,7 @@ object DatabaseBackup {
     private fun JSONObject.toParticipant() = TournamentParticipantEntity(
         tournamentId = getLong("tournamentId"), playerId = getLong("playerId"),
         playerNameSnapshot = getString("playerNameSnapshot"), clanIdSnapshot = longOrNull("clanIdSnapshot"),
-        clanNameSnapshot = stringOrNull("clanNameSnapshot"), seed = getInt("seed")
+        clanNameSnapshot = stringOrNull("clanNameSnapshot"), seed = getInt("seed"), isQueued = optBoolean("isQueued", false)
     )
     private fun JSONObject.toMatch() = MatchEntity(
         id = getLong("id"), tournamentId = getLong("tournamentId"), matchNumber = getInt("matchNumber"),
