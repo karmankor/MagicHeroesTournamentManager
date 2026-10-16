@@ -10,16 +10,19 @@ Nativní aplikace pro Android v Kotlinu, Jetpack Compose a Room. Data zůstávaj
 - předem sestavený graf vítězné a poraženecké větve, detail zápasu a potvrzení/opravování výsledků;
 - +2 body za odehranou výhru a +10 bonusových bodů navíc za výhru ve finále;
 - statistiky, série, žebříčky hráčů/klanů a historie;
-- plánované rozšíření: ELO od 1000 bodů, přepočet podle skutečných výsledků a ruční úpravy úvodních dvojic s bezpečným přepočtem návazných zápasů;
+- ELO hodnocení od 1000 bodů (K = 32) a samostatný ELO žebříček podle skutečných vzájemných výsledků;
+- ruční úprava úvodních dvojic s potvrzením; změněné návazné výsledky, turnajové body a ELO se bezpečně přepočítají;
 - offline PDF export turnaje, hráče a žebříčků přes systémový dialog pro uložení souboru;
 - záloha celé lokální databáze do JSON a obnova ze souboru; obnovení nejprve ověří zálohu a přepisuje data v jediné databázové transakci;
 - jednotkové testy bodování a plánu bracketu.
 
-## Pravidla bracketu ve verzi 0.1
+## Pravidla bracketu
 
-Implementovaným výchozím modelem je **double elimination** (hráč vypadne po druhé prohře) pro 2–32 hráčů. Účastníci se párují podle pořadí ve výběru: první s druhým, třetí se čtvrtým atd. Návazné zápasy jsou definované dopředu. Vítěz pokračuje vítěznou větví, poražený přechází do odpovídající pozice poraženecké větve. Druhá prohra v poraženecké větvi už dál nenavazuje.
+Implementovaným výchozím modelem je **double elimination** (hráč vypadne po druhé prohře) pro 2–32 hráčů. Velikost pavouka se vybere podle počtu účastníků: malý pro 2–8 hráčů (8 míst), střední pro 9–16 hráčů (16 míst) a velký pro 17–32 hráčů (32 míst). Celá kapacita je připravená od začátku, včetně volných úvodních pozic pro pozdější hráče. Účastníci se párují podle pořadí ve výběru: první s druhým, třetí se čtvrtým atd. Návazné zápasy jsou definované dopředu. Vítěz pokračuje vítěznou větví, poražený přechází do odpovídající pozice poraženecké větve. Druhá prohra v poraženecké větvi už dál nenavazuje.
 
-Neúplný úvodní zápas se **nevyhodnotí automaticky**. Pořadatel musí výslovně potvrdit postup bez zápasu; tento postup neposkytuje body za výhru. Bracket je přepočítáván po výsledku i po opravě a starý výsledek navazujícího zápasu se zahodí, pokud se změní jeho hráči.
+Zápas s jedním hráčem se **nevyhodnotí automaticky**. Pořadatel musí výslovně potvrdit postup bez zápasu; tento postup neposkytuje body za výhru. Bracket je přepočítáván po výsledku i po opravě a starý výsledek navazujícího zápasu se zahodí, pokud se změní jeho hráči. V ruční úpravě úvodních dvojic lze vyměnit hráče z různých zápasů; změna vyžaduje potvrzení, následné výsledky se zachovají pouze tehdy, pokud se obsazení zápasu nezměnilo.
+
+ELO začíná na 1000 a používá koeficient K = 32. Počítá se z odehraných vzájemných zápasů napříč turnaji, nikoli z celkového počtu výher, sérií nebo turnajových bodů. Oprava výsledku přepočítá ratingy z historie znovu; postup bez odehrané hry ELO nemění.
 
 V této verzi se používá jedno rozhodující velké finále bez dodatečného „reset finále“. Vítěz finále dostane 2 body za výhru a dalších 10 bonusových bodů. Tento model je zvolen jako výchozí implementace; pokud má vaše turnajová varianta jiné pevné rozmístění 32 zápasových pozic, reset finále nebo jiné přesuny poražených, je potřeba upravit plán v `domain/BracketEngine.kt` před ostrým používáním.
 

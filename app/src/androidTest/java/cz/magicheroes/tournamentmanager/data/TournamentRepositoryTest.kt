@@ -32,23 +32,28 @@ class TournamentRepositoryTest {
     }
 
     @Test
-    fun finalVictoryAddsTwelvePointsAndCorrectionDoesNotDuplicatePoints() = runBlocking {
+    fun playedMatchAddsPointsAndCorrectionUpdatesEloWithoutDuplicates() = runBlocking {
         repository.addPlayer("Ada", null)
         repository.addPlayer("Borek", null)
         val ids = database.tournamentDao().getPlayers().map { it.id }
         val tournamentId = repository.createAndStartTournament("Testovací turnaj", "2026-10-15", "", ids)
 
+        // Match 1 is the first-round match in the reserved small bracket, not the grand final.
         repository.recordWinner(tournamentId, 1, ids[0])
         var ledger = database.tournamentDao().getPointsForTournament(tournamentId)
-        assertEquals(12, ledger.sumOf { it.points }) // +2 for winning the final, +10 bonus
-        assertEquals(2, ledger.size)
+        assertEquals(2, ledger.sumOf { it.points })
+        assertEquals(1, ledger.size)
+        assertEquals(1016, database.tournamentDao().getPlayer(ids[0])?.eloRating)
+        assertEquals(984, database.tournamentDao().getPlayer(ids[1])?.eloRating)
 
-        // Recording/correcting the result rebuilds the ledger, it does not append duplicates.
+        // A correction replays history and replaces the ledger rather than appending points.
         repository.recordWinner(tournamentId, 1, ids[1])
         ledger = database.tournamentDao().getPointsForTournament(tournamentId)
-        assertEquals(12, ledger.sumOf { it.points })
+        assertEquals(2, ledger.sumOf { it.points })
+        assertEquals(1, ledger.size)
         assertTrue(ledger.all { it.playerId == ids[1] })
-        assertEquals(ids[1], database.tournamentDao().getTournament(tournamentId)?.winnerId)
+        assertEquals(984, database.tournamentDao().getPlayer(ids[0])?.eloRating)
+        assertEquals(1016, database.tournamentDao().getPlayer(ids[1])?.eloRating)
 
         repository.finishTournament(tournamentId)
         assertEquals(TournamentEntity.STATUS_FINISHED, database.tournamentDao().getTournament(tournamentId)?.status)
