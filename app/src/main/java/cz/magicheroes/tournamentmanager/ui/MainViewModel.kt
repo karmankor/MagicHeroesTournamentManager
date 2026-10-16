@@ -134,6 +134,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.finishTournament(tournamentId)
     }
 
+    fun deleteTournament(tournamentId: Long) = perform("Turnaj a jeho výsledky byly smazány.") {
+        repository.deleteTournament(tournamentId)
+        if (selectedTournamentId.value == tournamentId) selectedTournamentId.value = null
+    }
+
     fun exportBackup(uri: Uri) = perform("Záloha byla bezpečně uložena.") {
         DatabaseBackup.export(database, getApplication<Application>().contentResolver, uri)
     }
