@@ -662,7 +662,7 @@ private fun TournamentDetailScreen(
             StatTile("Body", points.sumOf { it.points }.toString(), Modifier.weight(1f))
         }
         Text("ÚČASTNÍCI", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
-        Text(participants.joinToString("  ·  ") { it.playerNameSnapshot }, style = MaterialTheme.typography.bodySmall)
+        Text(activeParticipants.joinToString("  ·  ") { it.playerNameSnapshot }, style = MaterialTheme.typography.bodySmall)
         Divider(color = Color(0xFF393142))
         Text("BRACKET", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text("Posouvej do stran. Kliknutím na zápas zadáš nebo opravíš výsledek.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1110,7 +1110,7 @@ private fun buildTournamentPdf(tournament: TournamentEntity, participants: List<
     add("Stav: ${tournament.status}")
     if (tournament.note.isNotBlank()) { add("Poznámka: ${tournament.note}"); add("") }
     add("ÚČASTNÍCI")
-    participants.sortedBy { it.seed }.forEach { add("${it.seed}. ${it.playerNameSnapshot} — ${it.clanNameSnapshot ?: "Bez klanu"}") }
+    participants.sortedBy { it.seed }.forEach { add("${if (it.isQueued) "ČEKÁ ${it.seed}. " else "${it.seed}. "}${it.playerNameSnapshot} — ${it.clanNameSnapshot ?: "Bez klanu"}") }
     add("")
     add("ZÁPASY")
     matches.forEach { m ->
