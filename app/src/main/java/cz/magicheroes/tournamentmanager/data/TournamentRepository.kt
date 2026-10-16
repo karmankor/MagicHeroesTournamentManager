@@ -650,7 +650,7 @@ class TournamentRepository(private val database: AppDatabase) {
     ): Boolean {
         if (slot !in 0..1) return false
         val target = map[targetNumber] ?: return false
-        if (target.isTournamentFinal || target.status == "IN_PROGRESS") return false
+        if (target.status == "IN_PROGRESS") return false
         if (!allowRecordedResult && (target.selectedWinnerId != null || target.winnerId != null)) return false
         val existing = if (slot == 0) target.player1Id else target.player2Id
         val locked = if (slot == 0) target.manualPlayer1Locked else target.manualPlayer2Locked
