@@ -435,7 +435,7 @@ class TournamentRepository(private val database: AppDatabase) {
             val openingIndex = (participant.seed - 1) / 2
             val opening = storedMatches.firstOrNull { it.matchKey == "W1_" + openingIndex } ?: return@filterNot false
             manual.matchNumber != opening.matchNumber &&
-                (opening.winnerId == null || manual.assignedAt > (opening.completedAt ?: 0L))
+                opening.winnerId == null
         }.associateBy { it.seed }
 
         val working = storedMatches.associate { match ->
@@ -444,7 +444,11 @@ class TournamentRepository(private val database: AppDatabase) {
             val directTwoPlayerFinal = match.matchKey == "G" && storedMatches.size == 1
             var p1: TournamentParticipantEntity? = null
             var p2: TournamentParticipantEntity? = null
-            if (openingIndex != null && match.branch == "WINNERS" && match.roundNumber == 1) {
+            if (match.winnerId != null) {
+                // A completed match is immutable history. Manual edits affect future slots only.
+                p1 = match.player1Id?.let(participantById::get)
+                p2 = match.player2Id?.let(participantById::get)
+            } else if (openingIndex != null && match.branch == "WINNERS" && match.roundNumber == 1) {
                 p1 = participantBySeed[openingIndex * 2 + 1]
                     ?: previous.player1Id?.let(participantById::get)?.takeIf { previous.winnerId != null }
                 p2 = participantBySeed[openingIndex * 2 + 2]
@@ -605,25 +609,33 @@ class TournamentRepository(private val database: AppDatabase) {
         // before. Replaying the current outcome decides the new route; a changed entrant then
         // invalidates downstream results rather than preserving a now-impossible progression.
 
+        // Winners always advance to their designated next round. Never divert a winner
+        // into an arbitrary open slot just because the normal next-round seat is unavailable.
         if (!isLoser) {
             val targetNumber = source.nextWinnerMatchNumber
             val targetSlot = source.winnerTargetSlot
             if (targetNumber != null && targetSlot != null &&
-                assignPlayerToSlot(map, targetNumber, targetSlot, playerId, participantName(map, previousByNumber, playerId), false)
+                assignPlayerToSlot(
+                    map, targetNumber, targetSlot, playerId,
+                    participantName(map, previousByNumber, playerId), false
+                )
             ) return targetNumber
+            return null
         }
 
-        val preferredBranches = when {
-            source.branch == "WINNERS" && isLoser -> listOf("WINNERS", "LOSERS")
-            source.branch == "LOSERS" && isLoser -> listOf("LOSERS", "WINNERS")
-            source.branch == "WINNERS" -> listOf("WINNERS", "LOSERS")
-            else -> listOf("LOSERS", "WINNERS")
+        if (source.branch == "WINNERS") {
+            // A loser gets one chance to stay in the winners branch: only a vacant seat
+            // in the same round. Otherwise, send them to the nearest available losers seat.
+            val sameRoundWinnerSeat = findNearestOpenSlot(
+                map, source, playerId, "WINNERS", previousByNumber, sameRoundOnly = true
+            )
+            if (sameRoundWinnerSeat != null) return sameRoundWinnerSeat
+            return findNearestOpenSlot(map, source, playerId, "LOSERS", previousByNumber)
         }
-        for (branch in preferredBranches) {
-            val matchNumber = findNearestOpenSlot(map, source, playerId, branch, previousByNumber)
-            if (matchNumber != null) return matchNumber
-        }
-        return null
+
+        // Losing in the losers branch means elimination unless another losers-branch
+        // seat is available. Never send a loser back into the winners branch.
+        return findNearestOpenSlot(map, source, playerId, "LOSERS", previousByNumber)
     }
 
     private fun findNearestOpenSlot(
@@ -631,13 +643,15 @@ class TournamentRepository(private val database: AppDatabase) {
         source: MatchEntity,
         playerId: Long,
         branch: String,
-        previousByNumber: Map<Int, MatchEntity>
+        previousByNumber: Map<Int, MatchEntity>,
+        sameRoundOnly: Boolean = false
     ): Int? {
         val sourceOpponent = source.winnerId
         val candidates = map.values.asSequence()
             .filter { target ->
                 target.matchNumber != source.matchNumber &&
                     target.branch == branch &&
+                    (!sameRoundOnly || target.roundNumber == source.roundNumber) &&
                     !target.isTournamentFinal &&
                     target.selectedWinnerId == null &&
                     target.winnerId == null &&
