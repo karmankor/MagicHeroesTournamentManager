@@ -610,7 +610,7 @@ private fun LeaderboardScreen(
                                 Text("${stat.player.clanId?.let { id -> clans.firstOrNull { it.id == id }?.name } ?: "Bez klanu"} · ${stat.wins} V · ${stat.losses} P · ${formatPercent(stat.winRate)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text("ELO ${stat.player.eloRating} · W${stat.currentWinStreak} / L${stat.currentLossStreak} · max W${stat.longestWinStreak}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                             }
-                            Text("${stat.points} b.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                            Text(if (eloRanking) "${stat.player.eloRating} ELO" else "${stat.points} b.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
                         }
                     }
                 }
@@ -704,6 +704,9 @@ private fun TournamentDetailScreen(
         Text(activeParticipants.joinToString("  ·  ") { it.playerNameSnapshot }, style = MaterialTheme.typography.bodySmall)
         Divider(color = Color(0xFF393142))
         Text("BRACKET", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        val bracketCapacity = matches.count { it.branch == "WINNERS" && it.roundNumber == 1 } * 2
+        val bracketSize = when (bracketCapacity) { 8 -> "MALÝ"; 16 -> "STŘEDNÍ"; else -> "VELKÝ" }
+        Text("PAVOUK $bracketSize · KAPACITA $bracketCapacity HRÁČŮ", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
         Text("Posouvej do stran. Kliknutím na zápas zadáš nebo opravíš výsledek.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val columns = matches.groupBy { "${it.branch}|${it.roundNumber}" }.values.sortedWith(
             compareBy<List<MatchEntity>> { it.firstOrNull()?.let { m -> branchOrder(m.branch) } ?: 9 }

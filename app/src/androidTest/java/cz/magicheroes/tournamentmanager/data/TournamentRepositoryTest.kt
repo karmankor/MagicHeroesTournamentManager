@@ -71,6 +71,42 @@ class TournamentRepositoryTest {
         assertTrue(archived.isArchived)
     }
     @Test
+    fun lateEntrantFillsReservedSlotWithoutClearingPlayedResult() = runBlocking {
+        listOf("Ada", "Borek", "Cyril").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Pozdní hráč", "2026-10-16", "", ids.take(2))
+
+        repository.recordWinner(tournamentId, 1, ids[0])
+        repository.addPlayerToWaitlist(tournamentId, ids[2])
+        repository.promoteNextWaitlistedPlayer(tournamentId)
+
+        val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(14, matches.size)
+        assertEquals(ids[0], matches.getValue("W1_0").winnerId)
+        assertEquals(ids[2], matches.getValue("W1_1").player1Id)
+    }
+
+    @Test
+    fun manualOpeningSwapClearsOnlyNowInvalidResultsAndRecalculatesRating() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Ruční dvojice", "2026-10-16", "", ids)
+        val matchNumbers = database.tournamentDao().getMatches(tournamentId).associate { it.matchKey to it.matchNumber }
+
+        repository.recordWinner(tournamentId, matchNumbers.getValue("W1_0"), ids[0])
+        repository.recordWinner(tournamentId, matchNumbers.getValue("W1_1"), ids[2])
+        repository.swapOpeningEntrants(tournamentId, ids[0], ids[2], confirmed = true)
+
+        val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        org.junit.Assert.assertNull(matches.getValue("W1_0").winnerId)
+        org.junit.Assert.assertNull(matches.getValue("W1_1").winnerId)
+        assertEquals(ids[2], matches.getValue("W1_0").player1Id)
+        assertEquals(ids[0], matches.getValue("W1_1").player1Id)
+        assertEquals(0, database.tournamentDao().getPointsForTournament(tournamentId).sumOf { it.points })
+        ids.forEach { playerId -> assertEquals(1000, database.tournamentDao().getPlayer(playerId)?.eloRating) }
+    }
+
+    @Test
     fun correctingEarlierWinnerClearsResultsWhoseMatchupChanged() = runBlocking {
         listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
         val ids = database.tournamentDao().getPlayers().map { it.id }
