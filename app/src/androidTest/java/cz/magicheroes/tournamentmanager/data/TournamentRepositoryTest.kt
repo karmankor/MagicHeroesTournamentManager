@@ -196,6 +196,23 @@ class TournamentRepositoryTest {
     }
 
     @Test
+    fun loserInLosersBranchUsesAnotherFreeLosersSlot() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Volné místo v poraženecké větvi", "2026-10-16", "", ids)
+        val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        val lowerMatch = matches.getValue("L1_0")
+
+        repository.setManualMatchSlot(tournamentId, lowerMatch.matchNumber, 0, ids[0], true)
+        repository.setManualMatchSlot(tournamentId, lowerMatch.matchNumber, 1, ids[1], true)
+        repository.recordWinner(tournamentId, lowerMatch.matchNumber, ids[0])
+
+        val after = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(ids[1], after.getValue("L1_1").player1Id)
+        assertEquals(after.getValue("L1_1").matchNumber, after.getValue("L1_0").routedLoserMatchNumber)
+    }
+
+    @Test
     fun manualSlotAndClanPointAdjustmentsAreSaved() = runBlocking {
         listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
         repository.addClan("Ravens")
