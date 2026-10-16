@@ -397,6 +397,20 @@ class TournamentRepository(private val database: AppDatabase) {
         )
     }
 
+    /** Permanently removes one non-active tournament and all data owned by it. */
+    suspend fun deleteTournament(tournamentId: Long) = database.withTransaction {
+        val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
+        require(tournament.status != TournamentEntity.STATUS_ACTIVE) {
+            "Aktivní turnaj nelze smazat. Nejprve ho ukonči."
+        }
+        dao.deleteTournamentPoints(tournamentId)
+        dao.deleteTournamentMatches(tournamentId)
+        dao.deleteTournamentParticipants(tournamentId)
+        dao.deleteTournament(tournamentId)
+        // ELO is derived from match history, so recalculate it after removing these matches.
+        rebuildEloRatings()
+    }
+
     private data class ManualPlacement(
         val matchNumber: Int,
         val slot: Int,
