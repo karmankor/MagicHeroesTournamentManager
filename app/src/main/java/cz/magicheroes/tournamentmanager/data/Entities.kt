@@ -1,5 +1,6 @@
 package cz.magicheroes.tournamentmanager.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -50,7 +51,7 @@ data class TournamentParticipantEntity(
     val clanIdSnapshot: Long? = null,
     val clanNameSnapshot: String? = null,
     val seed: Int,
-    val isQueued: Boolean = false
+    @ColumnInfo(defaultValue = "0") val isQueued: Boolean = false
 )
 
 @Entity(
