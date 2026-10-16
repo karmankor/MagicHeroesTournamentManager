@@ -213,6 +213,28 @@ class TournamentRepositoryTest {
     }
 
     @Test
+    fun manuallyReplacingFutureOpponentPreservesPlayedHistoryAndPoints() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Ruční změna soupeře bez ztráty historie", "2026-10-16", "", ids)
+        val matchNumbers = database.tournamentDao().getMatches(tournamentId).associate { it.matchKey to it.matchNumber }
+
+        repository.recordWinner(tournamentId, matchNumbers.getValue("W1_0"), ids[0])
+        repository.recordWinner(tournamentId, matchNumbers.getValue("W1_1"), ids[2])
+        val pointsBefore = database.tournamentDao().getPointsForTournament(tournamentId).sumOf { it.points }
+
+        // Put a player with a completed first-round loss into a future opponent slot.
+        repository.setManualMatchSlot(tournamentId, matchNumbers.getValue("W2_0"), 1, ids[1], true)
+
+        val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(ids[0], matches.getValue("W1_0").winnerId)
+        assertEquals(ids[1], matches.getValue("W1_0").loserId)
+        assertEquals(ids[2], matches.getValue("W1_1").winnerId)
+        assertEquals(ids[1], matches.getValue("W2_0").player2Id)
+        assertEquals(pointsBefore, database.tournamentDao().getPointsForTournament(tournamentId).sumOf { it.points })
+    }
+
+    @Test
     fun manualSlotAndClanPointAdjustmentsAreSaved() = runBlocking {
         listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
         repository.addClan("Ravens")
