@@ -427,7 +427,7 @@ private fun HomeScreen(
         HomeAction("▤  Historie turnajů", "$tournamentCount uložených turnajů", onHistory)
         Divider(color = Color(0xFF393142))
         Text("ZÁLOHA DAT", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
-        Text("Záloha obsahuje hráče, klany, turnaje, bracket i bodové záznamy.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Záloha obsahuje hráče, klany, turnaje, pavouk i ruční úpravy bodů.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onBackup, modifier = Modifier.weight(1f)) { Text("Exportovat zálohu") }
             OutlinedButton(onClick = onRestore, modifier = Modifier.weight(1f)) { Text("Obnovit zálohu") }
@@ -531,7 +531,9 @@ private fun ClansScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             TextButton(onClick = { onOpen(clan) }) { Text("Detail") }
                             TextButton(onClick = { onEdit(clan) }) { Text("Přejmenovat") }
-                            TextButton(onClick = { onAdjustPoints(clan) }) { Text("Upravit body") }
+                            TextButton(onClick = { onAdjustPoints(clan) }) { Text("Body ±") }
+                        }
+                        Row {
                             TextButton(onClick = { onDelete(clan) }) { Text("Odstranit", color = MaterialTheme.colorScheme.error) }
                         }
                     }
@@ -1538,7 +1540,7 @@ private fun buildClanLeaderboardPdf(
     clans: List<ClanEntity>, players: List<PlayerEntity>, points: List<PointTransactionEntity>,
     adjustments: List<ClanPointAdjustmentEntity>, stats: List<PlayerStats>
 ): List<String> = buildList {
-    add("Pozice | Klan | Body z historických výsledků | Aktivní členové | Výhry členů | Prohry členů")
+    add("Pozice | Klan | Celkové body | Aktivní členové | Výhry členů | Prohry členů")
     clans.map { clan ->
         val memberStats = stats.filter { it.player.clanId == clan.id }
         val score = points.filter { it.clanIdSnapshot == clan.id }.sumOf { it.points } +
