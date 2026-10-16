@@ -137,6 +137,26 @@ class TournamentRepositoryTest {
     }
 
     @Test
+    fun withdrawalAfterLaterRoundPreservesEveryPlayedResultButStopsFutureProgression() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Odstoupení v pozdějším kole", "2026-10-16", "", ids)
+        val matchNumbers = database.tournamentDao().getMatches(tournamentId).associate { it.matchKey to it.matchNumber }
+
+        repository.recordWinner(tournamentId, matchNumbers.getValue("W1_0"), ids[0])
+        repository.recordWinner(tournamentId, matchNumbers.getValue("W1_1"), ids[2])
+        repository.recordWinner(tournamentId, matchNumbers.getValue("W2_0"), ids[0])
+        repository.withdrawPlayer(tournamentId, ids[0])
+
+        val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(ids[0], matches.getValue("W1_0").winnerId)
+        assertEquals(ids[0], matches.getValue("W2_0").winnerId)
+        assertEquals(ids[2], matches.getValue("W2_0").player2Id)
+        assertEquals(null, matches.getValue("G").player1Id)
+        assertEquals(6, database.tournamentDao().getPointsForTournament(tournamentId).sumOf { it.points })
+    }
+
+    @Test
     fun correctingEarlierWinnerClearsResultsWhoseMatchupChanged() = runBlocking {
         listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
         val ids = database.tournamentDao().getPlayers().map { it.id }

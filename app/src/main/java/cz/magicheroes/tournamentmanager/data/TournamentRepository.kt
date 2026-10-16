@@ -310,6 +310,14 @@ class TournamentRepository(private val database: AppDatabase) {
             } else if (directTwoPlayerFinal) {
                 p1 = participants.getOrNull(0)
                 p2 = participants.getOrNull(1)
+            } else if (
+                match.winnerId != null &&
+                listOfNotNull(match.player1Id, match.player2Id).any { participantById[it]?.isWithdrawn == true }
+            ) {
+                // A withdrawal cannot erase completed history, including later winners/losers
+                // bracket games. Keep both original entrants for this already-played matchup.
+                p1 = match.player1Id?.let(participantById::get)
+                p2 = match.player2Id?.let(participantById::get)
             }
             working[match.matchNumber] = match.copy(
                 player1Id = p1?.playerId,
