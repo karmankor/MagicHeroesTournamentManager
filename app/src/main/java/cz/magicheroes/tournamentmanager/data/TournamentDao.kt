@@ -158,4 +158,19 @@ interface TournamentDao {
 
     @Query("SELECT * FROM point_transactions WHERE tournamentId = :tournamentId ORDER BY createdAt")
     suspend fun getPointsForTournament(tournamentId: Long): List<PointTransactionEntity>
+
+    @Query("SELECT * FROM clan_point_adjustments ORDER BY createdAt, id")
+    fun observeClanPointAdjustments(): Flow<List<ClanPointAdjustmentEntity>>
+
+    @Query("SELECT * FROM clan_point_adjustments ORDER BY id")
+    suspend fun getAllClanPointAdjustmentsForBackup(): List<ClanPointAdjustmentEntity>
+
+    @Insert
+    suspend fun insertClanPointAdjustment(item: ClanPointAdjustmentEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun restoreClanPointAdjustments(items: List<ClanPointAdjustmentEntity>)
+
+    @Query("DELETE FROM clan_point_adjustments")
+    suspend fun clearClanPointAdjustments()
 }
