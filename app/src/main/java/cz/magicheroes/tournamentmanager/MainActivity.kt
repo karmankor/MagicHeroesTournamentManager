@@ -229,6 +229,9 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                     onWinner = { matchNumber, winnerId -> vm.recordWinner(activeTournament.id, matchNumber, winnerId) },
                     onAdvance = { vm.advanceWithoutMatch(activeTournament.id, it) },
                     onSwapEntrants = { first, second, confirmed -> vm.swapOpeningEntrants(activeTournament.id, first, second, confirmed) },
+                    onSetManualSlot = { matchNumber, slot, playerId, locked ->
+                        vm.setManualMatchSlot(activeTournament.id, matchNumber, slot, playerId, locked)
+                    },
                     onWithdrawPlayer = { playerId -> vm.withdrawPlayer(activeTournament.id, playerId) },
                     onFinish = { vm.finishTournament(activeTournament.id) },
                     onExport = {
@@ -670,11 +673,13 @@ private fun TournamentDetailScreen(
     playerName: (Long) -> String, playerElo: (Long) -> Int, points: List<PointTransactionEntity>,
     onBack: () -> Unit, onAddExistingPlayer: (Long) -> Unit, onAddNewPlayer: (String) -> Unit, onPromoteNext: () -> Unit,
     onStartMatch: (Int) -> Unit, onWinner: (Int, Long) -> Unit, onAdvance: (Int) -> Unit,
-    onSwapEntrants: (Long, Long, Boolean) -> Unit, onWithdrawPlayer: (Long) -> Unit,
-    onFinish: () -> Unit, onExport: () -> Unit
+    onSwapEntrants: (Long, Long, Boolean) -> Unit,
+    onSetManualSlot: (Int, Int, Long?, Boolean) -> Unit,
+    onWithdrawPlayer: (Long) -> Unit, onFinish: () -> Unit, onExport: () -> Unit
 ) {
     var matchToEdit by remember { mutableStateOf<MatchEntity?>(null) }
     var matchToSwap by remember { mutableStateOf<MatchEntity?>(null) }
+    var matchToManualSlots by remember { mutableStateOf<MatchEntity?>(null) }
     var participantToWithdraw by remember { mutableStateOf<Long?>(null) }
     var showFinishConfirm by remember { mutableStateOf(false) }
     var showWaitlistDialog by remember { mutableStateOf(false) }
@@ -821,8 +826,21 @@ private fun TournamentDetailScreen(
         onConfirmWinner = { winnerId -> onWinner(match.matchNumber, winnerId); matchToEdit = null },
         onAdvance = { onAdvance(match.matchNumber); matchToEdit = null },
         canEditPairing = match.branch == "WINNERS" && match.roundNumber == 1 && match.player1Id != null && match.player2Id != null,
-        onEditPairing = { matchToEdit = null; matchToSwap = match }
+        onEditPairing = { matchToEdit = null; matchToSwap = match },
+        canEditSlots = tournament.status == TournamentEntity.STATUS_ACTIVE && match.winnerId == null && match.status != "IN_PROGRESS",
+        onEditSlots = { matchToEdit = null; matchToManualSlots = match }
     )
+    }
+    matchToManualSlots?.let { match ->
+        ManualSlotDialog(
+            match = match,
+            participants = participants.filterNot { it.isWithdrawn }.sortedBy { it.seed },
+            onDismiss = { matchToManualSlots = null },
+            onSave = { slot, playerId, locked ->
+                onSetManualSlot(match.matchNumber, slot, playerId, locked)
+                matchToManualSlots = null
+            }
+        )
     }
     matchToSwap?.let { match ->
         ManualSwapDialog(
@@ -900,7 +918,8 @@ private fun MatchCard(match: MatchEntity, playerName: (Long) -> String, playerEl
 private fun MatchResultDialog(
     match: MatchEntity, playerName: (Long) -> String, isFinished: Boolean, onDismiss: () -> Unit, onStart: () -> Unit,
     onConfirmWinner: (Long) -> Unit, onAdvance: () -> Unit,
-    canEditPairing: Boolean, onEditPairing: () -> Unit
+    canEditPairing: Boolean, onEditPairing: () -> Unit,
+    canEditSlots: Boolean, onEditSlots: () -> Unit
 ) {
     var chosenWinner by remember(match.id, match.winnerId) { mutableStateOf(match.winnerId) }
     var confirmAdvance by remember { mutableStateOf(false) }
@@ -933,6 +952,9 @@ private fun MatchResultDialog(
                 else if (one != null && confirmAdvance) Button(onClick = onAdvance) { Text("Ano, potvrdit postup") }
                 if (canEditPairing) {
                     TextButton(onClick = onEditPairing) { Text("Ruční úprava soupeře") }
+                }
+                if (canEditSlots) {
+                    TextButton(onClick = onEditSlots) { Text("Upravit libovolnou pozici") }
                 }
                 if (!isFinished && match.player1Id != null && match.player2Id != null && match.winnerId == null && match.status != "IN_PROGRESS") {
                     TextButton(onClick = onStart) { Text("Označit jako rozehraný") }
