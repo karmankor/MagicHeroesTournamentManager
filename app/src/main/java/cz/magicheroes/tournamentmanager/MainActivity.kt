@@ -1252,6 +1252,53 @@ private fun ClanProfileDialog(
 }
 
 @Composable
+private fun ClanPointsDialog(
+    clan: ClanEntity,
+    onDismiss: () -> Unit,
+    onSubmit: (Int, String) -> Unit
+) {
+    var amount by remember(clan.id) { mutableStateOf("1") }
+    var reason by remember(clan.id) { mutableStateOf("") }
+    val parsedAmount = amount.toIntOrNull()?.takeIf { it in 1..1_000_000 }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Upravit body · ${clan.name}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Přidání nebo odebrání bodů se uloží do historie a zachová se i po restartu.")
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { value -> amount = value.filter { it.isDigit() }.take(7) },
+                    label = { Text("Počet bodů") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = { reason = it.take(120) },
+                    label = { Text("Důvod (volitelné)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(
+                    enabled = parsedAmount != null,
+                    onClick = { parsedAmount?.let { onSubmit(it, reason) } }
+                ) { Text("+ Přidat") }
+                Button(
+                    enabled = parsedAmount != null,
+                    onClick = { parsedAmount?.let { onSubmit(-it, reason) } }
+                ) { Text("− Odebrat") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
+    )
+}
+
+@Composable
 private fun ConfirmDialog(title: String, text: String, confirm: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
