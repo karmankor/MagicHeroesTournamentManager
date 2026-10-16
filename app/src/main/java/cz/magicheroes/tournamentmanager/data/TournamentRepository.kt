@@ -223,6 +223,7 @@ class TournamentRepository(private val database: AppDatabase) {
         require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Ruční pozice lze měnit jen v aktivním turnaji." }
         val matches = dao.getMatches(tournamentId)
         val target = matches.firstOrNull { it.matchNumber == matchNumber } ?: error("Zápas neexistuje.")
+        val previousSlotPlayerId = if (slot == 0) target.player1Id else target.player2Id
         require(target.winnerId == null && target.selectedWinnerId == null && target.status != "IN_PROGRESS") {
             "Obsazení lze měnit jen v neodehraném a nerozehraném zápase."
         }
@@ -263,6 +264,32 @@ class TournamentRepository(private val database: AppDatabase) {
                     updatedMatch = updatedMatch.copy(manualPlayer2Locked = false, manualPlayer2Id = null, manualPlayer2AssignedAt = null)
                 }
                 if (updatedMatch != old) dao.updateMatch(updatedMatch)
+            }
+        }
+
+        // If a late entrant with no played history is removed from their only manual seat,
+        // return them to the waitlist instead of silently leaving them outside the bracket.
+        if (previousSlotPlayerId != null && previousSlotPlayerId != playerId) {
+            val previousParticipant = dao.getParticipants(tournamentId).firstOrNull { it.playerId == previousSlotPlayerId }
+            val openingCapacity = matches.count { it.branch == "WINNERS" && it.roundNumber == 1 } * 2
+            val hasPlayedHistory = matches.any { match ->
+                match.winnerId != null && (
+                    match.player1Id == previousSlotPlayerId ||
+                        match.player2Id == previousSlotPlayerId ||
+                        match.winnerId == previousSlotPlayerId ||
+                        match.loserId == previousSlotPlayerId
+                    )
+            }
+            val hasAnotherManualPin = matches.any { match ->
+                match.matchNumber != matchNumber &&
+                    ((match.manualPlayer1Locked && match.manualPlayer1Id == previousSlotPlayerId) ||
+                        (match.manualPlayer2Locked && match.manualPlayer2Id == previousSlotPlayerId))
+            }
+            if (previousParticipant != null && previousParticipant.seed > openingCapacity &&
+                !previousParticipant.isQueued && !previousParticipant.isWithdrawn &&
+                !hasPlayedHistory && !hasAnotherManualPin
+            ) {
+                dao.updateParticipant(previousParticipant.copy(isQueued = true))
             }
         }
 
