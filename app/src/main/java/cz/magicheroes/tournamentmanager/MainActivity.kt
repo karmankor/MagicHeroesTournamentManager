@@ -282,6 +282,7 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                         allPlayers = allPlayers,
                         onCreate = { showCreateTournament = true },
                         onOpen = { selectedTournamentId = it.id; vm.openTournament(it.id) },
+                        onDelete = { deleteTournamentConfirm = it },
                         onExportLeaderboard = { startPdf(PdfRequest("magic-heroes-zebricek.pdf", "Magic Heroes — žebříček hráčů", buildLeaderboardPdf(stats, clanMap))) }
                     )
                     Page.LEADERBOARD -> LeaderboardScreen(
@@ -555,7 +556,7 @@ private fun ClansScreen(
 @Composable
 private fun TournamentsScreen(
     tournaments: List<TournamentEntity>, participants: List<TournamentParticipantEntity>, matches: List<MatchEntity>, allPlayers: List<PlayerEntity>,
-    onCreate: () -> Unit, onOpen: (TournamentEntity) -> Unit, onExportLeaderboard: () -> Unit
+    onCreate: () -> Unit, onOpen: (TournamentEntity) -> Unit, onDelete: (TournamentEntity) -> Unit, onExportLeaderboard: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -569,15 +570,22 @@ private fun TournamentsScreen(
                 val all = matches.filter { it.tournamentId == tournament.id }
                 val played = all.count { it.winnerId != null }
                 val winnerName = tournament.winnerId?.let { id -> allPlayers.firstOrNull { it.id == id }?.name ?: participants.firstOrNull { it.tournamentId == tournament.id && it.playerId == id }?.playerNameSnapshot }
-                Card(onClick = { onOpen(tournament) }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, Color(0xFF393142))) {
-                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(tournament.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            StatusPill(tournament.status)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Card(onClick = { onOpen(tournament) }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, Color(0xFF393142))) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(tournament.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                StatusPill(tournament.status)
+                            }
+                            Text(tournament.dateIso, color = MaterialTheme.colorScheme.secondary)
+                            Text("$count hráčů · $played/${all.size} dokončených zápasů", style = MaterialTheme.typography.bodySmall)
+                            if (winnerName != null) Text("Vítěz: $winnerName", style = MaterialTheme.typography.bodySmall)
                         }
-                        Text(tournament.dateIso, color = MaterialTheme.colorScheme.secondary)
-                        Text("$count hráčů · $played/${all.size} dokončených zápasů", style = MaterialTheme.typography.bodySmall)
-                        if (winnerName != null) Text("Vítěz: $winnerName", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (tournament.status == TournamentEntity.STATUS_FINISHED) {
+                        TextButton(onClick = { onDelete(tournament) }) {
+                            Text("Smazat tento turnaj a jeho výsledky", color = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
             }
