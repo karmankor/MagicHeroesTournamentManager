@@ -220,6 +220,7 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                     onBack = { selectedTournamentId = null; vm.closeTournament() },
                     onAddExistingPlayer = { vm.addPlayerToWaitlist(activeTournament.id, it) },
                     onAddNewPlayer = { vm.createPlayerInWaitlist(activeTournament.id, it) },
+                    onPromoteNext = { vm.promoteNextWaitlistedPlayer(activeTournament.id) },
                     onStartMatch = { vm.startMatch(activeTournament.id, it) },
                     onWinner = { matchNumber, winnerId -> vm.recordWinner(activeTournament.id, matchNumber, winnerId) },
                     onAdvance = { vm.advanceWithoutMatch(activeTournament.id, it) },
@@ -621,7 +622,7 @@ private fun LeaderboardScreen(
 @Composable
 private fun TournamentDetailScreen(
     tournament: TournamentEntity, matches: List<MatchEntity>, participants: List<TournamentParticipantEntity>, availablePlayers: List<PlayerEntity>, playerName: (Long) -> String,
-    points: List<PointTransactionEntity>, onBack: () -> Unit, onAddExistingPlayer: (Long) -> Unit, onAddNewPlayer: (String) -> Unit,
+    points: List<PointTransactionEntity>, onBack: () -> Unit, onAddExistingPlayer: (Long) -> Unit, onAddNewPlayer: (String) -> Unit, onPromoteNext: () -> Unit,
     onStartMatch: (Int) -> Unit, onWinner: (Int, Long) -> Unit, onAdvance: (Int) -> Unit, onFinish: () -> Unit, onExport: () -> Unit
 ) {
     var matchToEdit by remember { mutableStateOf<MatchEntity?>(null) }
@@ -646,13 +647,27 @@ private fun TournamentDetailScreen(
             }
         }
         if (queued.isNotEmpty()) {
+            val openingMatches = matches.filter { it.branch == "WINNERS" && it.roundNumber == 1 }
+            val nextOpening = openingMatches.firstOrNull { it.matchKey == "W1_${activeParticipants.size / 2}" }
+            val canPromote = tournament.status == TournamentEntity.STATUS_ACTIVE &&
+                openingMatches.isNotEmpty() && activeParticipants.size < openingMatches.size * 2 &&
+                nextOpening != null && nextOpening.winnerId == null && nextOpening.selectedWinnerId == null &&
+                !nextOpening.byeConfirmed && nextOpening.status != "IN_PROGRESS"
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("ČEKACÍ FRONTA", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
                     queued.forEachIndexed { index, participant ->
                         Text("${index + 1}. ${participant.playerNameSnapshot}", style = MaterialTheme.typography.bodyMedium)
                     }
-                    Text("Hráči zůstávají ve frontě, dokud jim organizátor nepřiřadí volné místo.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = onPromoteNext, enabled = canPromote, modifier = Modifier.fillMaxWidth()) {
+                        Text("Zařadit dalšího do volného pole")
+                    }
+                    Text(
+                        if (canPromote) "Další čekající bude zařazen bez změny dosavadních výsledků."
+                        else "Čekající hráče lze zařadit, až bude v bracketu bezpečně volné místo.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
