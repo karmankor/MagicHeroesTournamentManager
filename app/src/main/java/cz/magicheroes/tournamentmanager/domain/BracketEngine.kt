@@ -60,7 +60,7 @@ object BracketEngine {
         // lower-bracket match remains (e.g. 4-2-1, 8-4-2-1, 16-8-4-2-1).
         val lowerRoundCount = winnersRoundCount
         for (round in 1..lowerRoundCount) {
-            val count = size shr (round + 1)
+            val count = size shr round
             val row = (0 until count).map { index ->
                 Blueprint("L${round}_${index}", round, "LOSERS")
             }
@@ -84,8 +84,9 @@ object BracketEngine {
                 }
 
                 if (round == 1) {
-                    node.nextLoserKey = "L1_${index / 2}"
-                    node.loserTargetSlot = index % 2
+                    // Give every opening winners match its own prepared losers match.
+                    node.nextLoserKey = "L1_$index"
+                    node.loserTargetSlot = 0
                 } else {
                     // Losers from every winners-branch round are routed by the repository
                     // into the first available opening slot. Keep the graph link within
