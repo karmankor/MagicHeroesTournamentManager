@@ -8,6 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BracketEngineTest {
+    // Regression coverage for symmetric branch depth and opening-round capacity.
     private fun entrants(count: Int) = (1..count).map { Entrant(it.toLong(), "Hráč $it", null, null) }
 
     @Test fun eightPlayersCreatePreparedGraphWithMatchingOpeningRounds() {
