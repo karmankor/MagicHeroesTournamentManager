@@ -39,6 +39,14 @@ jobs:
           profile: pixel_2
           disk-size: 2048M
           ram-size: 2048M
+          # Hosted runners can have less free space than Android API 36's default
+          # userdata image requires. Remove preinstalled tools not needed by this app
+          # after the SDK/AVD has been created but before the emulator allocates userdata.
+          pre-emulator-launch-script: |
+            sudo rm -rf /usr/share/dotnet /opt/hostedtoolcache/CodeQL /usr/local/share/powershell
+            sudo rm -rf /usr/local/lib/android/sdk/ndk /usr/local/lib/android/sdk/cmake
+            df -h /
+          emulator-boot-timeout: 180
           script: bash gradlew connectedDebugAndroidTest
 
       - name: Build debug APK
