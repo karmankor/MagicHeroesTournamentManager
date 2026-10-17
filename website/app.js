@@ -232,7 +232,7 @@ async function loadSnapshot() {
   }
   try {
     const response = await fetch(url + "/rest/v1/public_site_snapshot?select=snapshot,published_at&id=eq.1", {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY }
+      headers: { apikey: SUPABASE_ANON_KEY }
     });
     if (!response.ok) throw new Error("Supabase vrátil HTTP " + response.status + ". Zkontroluj URL, klíč a veřejnou SELECT politiku.");
     const rows = await response.json();
