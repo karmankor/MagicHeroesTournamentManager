@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -344,8 +345,8 @@ class TournamentRepositoryTest {
             val after = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
             assertEquals(tournamentName, ids[4], after.getValue("W2_1").player1Id)
             assertEquals(tournamentName, ids[0], after.getValue("W2_1").player2Id)
-            assertEquals(tournamentName, null, after.getValue("W2_0").player1Id)
-            assertEquals(tournamentName, null, after.getValue("W2_0").player2Id)
+            assertNull(tournamentName, after.getValue("W2_0").player1Id)
+            assertNull(tournamentName, after.getValue("W2_0").player2Id)
             assertEquals(
                 after.getValue("W2_1").matchNumber,
                 after.getValue("W1_0").routedWinnerMatchNumber
