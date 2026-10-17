@@ -12,11 +12,12 @@ class BracketEngineTest {
 
     @Test fun eightPlayersCreatePreparedGraphWithMatchingOpeningRounds() {
         val matches = BracketEngine.createPlan(10, entrants(8))
-        assertEquals(17, matches.size)
+        assertEquals(15, matches.size)
         assertEquals(4, matches.count { it.branch == "WINNERS" && it.roundNumber == 1 })
         assertEquals(4, matches.count { it.branch == "LOSERS" && it.roundNumber == 1 })
-        assertEquals(9, matches.count { it.branch == "LOSERS" })
+        assertEquals(7, matches.count { it.branch == "LOSERS" })
         assertEquals(1, matches.count { it.isTournamentFinal })
+        assertEquals(matches.filter { it.branch == "WINNERS" }.maxOf { it.roundNumber }, matches.filter { it.branch == "LOSERS" }.maxOf { it.roundNumber })
         assertTrue(matches.filter { it.branch == "WINNERS" && it.roundNumber == 1 }.all { it.player1Id != null && it.player2Id != null })
     }
 
@@ -39,20 +40,22 @@ class BracketEngineTest {
 
     @Test fun bracketsUsePreparedSmallMediumAndLargeCapacities() {
         val small = BracketEngine.createPlan(20, entrants(2))
-        assertEquals(17, small.size)
+        assertEquals(15, small.size)
         assertEquals(4, small.count { it.branch == "WINNERS" && it.roundNumber == 1 })
         assertEquals(4, small.count { it.branch == "LOSERS" && it.roundNumber == 1 })
         assertEquals(3, small.count { it.branch == "WINNERS" && it.roundNumber == 1 && it.player2Id == null })
 
         val medium = BracketEngine.createPlan(21, entrants(9))
-        assertEquals(37, medium.size)
+        assertEquals(31, medium.size)
         assertEquals(8, medium.count { it.branch == "WINNERS" && it.roundNumber == 1 })
         assertEquals(8, medium.count { it.branch == "LOSERS" && it.roundNumber == 1 })
 
         val large = BracketEngine.createPlan(22, entrants(17))
-        assertEquals(77, large.size)
+        assertEquals(63, large.size)
         assertEquals(16, large.count { it.branch == "WINNERS" && it.roundNumber == 1 })
         assertEquals(16, large.count { it.branch == "LOSERS" && it.roundNumber == 1 })
+        assertEquals(5, large.filter { it.branch == "WINNERS" }.maxOf { it.roundNumber })
+        assertEquals(5, large.filter { it.branch == "LOSERS" }.maxOf { it.roundNumber })
     }
 
     @Test fun duplicatePlayerIdsAreRejected() {
