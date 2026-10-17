@@ -33,7 +33,10 @@ class BracketEngineTest {
 
     @Test fun graphIsAcyclicAndEveryNodeCanBeOrdered() {
         val matches = BracketEngine.createPlan(12, entrants(32))
-        assertEquals(77, matches.size)
+        assertEquals(63, matches.size)
+        assertEquals(listOf(16, 8, 4, 2, 1), (1..5).map { round ->
+            matches.count { it.branch == "LOSERS" && it.roundNumber == round }
+        })
         assertEquals(matches.size, BracketEngine.topologicalOrder(matches).size)
         assertTrue(matches.all { it.nextWinnerMatchNumber == null || matches.any { m -> m.matchNumber == it.nextWinnerMatchNumber } })
         assertTrue(matches.all { it.nextLoserMatchNumber == null || matches.any { m -> m.matchNumber == it.nextLoserMatchNumber } })
