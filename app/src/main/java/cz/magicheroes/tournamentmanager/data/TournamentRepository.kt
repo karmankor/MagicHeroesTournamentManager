@@ -600,18 +600,34 @@ class TournamentRepository(private val database: AppDatabase) {
     ): Int? {
         if (source.isTournamentFinal) return null
 
-        // Winners always advance to their designated next round. Never divert a winner
-        // into an arbitrary open slot just because the normal next-round seat is unavailable.
+        // Winners and lower-branch winners advance one round at a time. In that next
+        // round, first join a match where an opponent is already waiting. Only if there
+        // is no such match do we use the pre-planned feeder match, then another empty seat.
+        // This prevents a waiting player from being skipped just because their original
+        // feeder finished later.
         if (!isLoser) {
             val targetNumber = source.nextWinnerMatchNumber
-            val targetSlot = source.winnerTargetSlot
-            if (targetNumber != null && targetSlot != null &&
-                assignPlayerToSlot(
-                    map, targetNumber, targetSlot, playerId,
-                    participantName(map, previousByNumber, playerId), false
-                )
-            ) return targetNumber
-            return null
+            val plannedTarget = targetNumber?.let(map::get)
+            if (plannedTarget?.branch == "FINAL") {
+                val targetSlot = source.winnerTargetSlot
+                if (targetNumber != null && targetSlot != null &&
+                    assignPlayerToSlot(
+                        map, targetNumber, targetSlot, playerId,
+                        participantName(map, previousByNumber, playerId), false
+                    )
+                ) return targetNumber
+                return null
+            }
+
+            return findNearestOpenSlot(
+                map = map,
+                source = source,
+                playerId = playerId,
+                branch = source.branch,
+                previousByNumber = previousByNumber,
+                targetRound = source.roundNumber + 1,
+                preferredMatchNumber = targetNumber
+            )
         }
 
         // Manual placements can override a loser's automatic destination, but never skip a
@@ -651,7 +667,9 @@ class TournamentRepository(private val database: AppDatabase) {
         playerId: Long,
         branch: String,
         previousByNumber: Map<Int, MatchEntity>,
-        openingRoundOnly: Boolean = false
+        openingRoundOnly: Boolean = false,
+        targetRound: Int? = null,
+        preferredMatchNumber: Int? = null
     ): Int? {
         val sourceOpponent = source.winnerId
         val candidates = map.values.asSequence()
@@ -659,6 +677,7 @@ class TournamentRepository(private val database: AppDatabase) {
                 target.matchNumber != source.matchNumber &&
                     target.branch == branch &&
                     (!openingRoundOnly || target.roundNumber == 1) &&
+                    (targetRound == null || target.roundNumber == targetRound) &&
                     !target.isTournamentFinal &&
                     target.selectedWinnerId == null &&
                     target.winnerId == null &&
@@ -674,13 +693,14 @@ class TournamentRepository(private val database: AppDatabase) {
                     target.player1Id != playerId && target.player2Id != playerId
             }
             .sortedWith(
-                // Pair a fresh entrant with someone already waiting before opening
-                // a completely empty match. This prevents earlier empty slots from
-                // making an opponent wait while another match could start immediately.
+                // A match with one player waiting is always more urgent than an empty
+                // match. If several candidates are waiting, keep the planned feeder as
+                // the first tie-breaker; otherwise preserve the planned path where possible.
                 compareBy<Pair<MatchEntity, Int>> {
                     if (it.first.player1Id != null || it.first.player2Id != null) 0 else 1
                 }
-                    .thenBy { kotlin.math.abs(it.first.roundNumber - source.roundNumber) }
+                    .thenBy { if (it.first.matchNumber == preferredMatchNumber) 0 else 1 }
+                    .thenBy { kotlin.math.abs(it.first.roundNumber - (targetRound ?: source.roundNumber)) }
                     .thenBy { it.first.matchNumber }
                     .thenBy { it.second }
             )

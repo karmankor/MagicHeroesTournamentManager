@@ -97,10 +97,23 @@ class BracketEngineTest {
             assertEquals(matches.size, matches.map { it.matchNumber }.distinct().size)
             assertTrue(matches.all { it.player1Id == null || it.player1Id in (1L..count.toLong()) })
             assertTrue(matches.all { it.player2Id == null || it.player2Id in (1L..count.toLong()) })
-            assertEquals(
-                matches.count { it.branch == "WINNERS" && it.roundNumber == 1 },
-                matches.count { it.branch == "LOSERS" && it.roundNumber == 1 }
-            )
+            val capacity = when {
+                count <= 8 -> 8
+                count <= 16 -> 16
+                else -> 32
+            }
+            val roundCount = when (capacity) {
+                8 -> 3
+                16 -> 4
+                else -> 5
+            }
+            assertEquals(roundCount, matches.filter { it.branch == "WINNERS" }.maxOf { it.roundNumber })
+            assertEquals(roundCount, matches.filter { it.branch == "LOSERS" }.maxOf { it.roundNumber })
+            for (round in 1..roundCount) {
+                val expectedMatches = capacity shr round
+                assertEquals(expectedMatches, matches.count { it.branch == "WINNERS" && it.roundNumber == round })
+                assertEquals(expectedMatches, matches.count { it.branch == "LOSERS" && it.roundNumber == round })
+            }
         }
     }
 }

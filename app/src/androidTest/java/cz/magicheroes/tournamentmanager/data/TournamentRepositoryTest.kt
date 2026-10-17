@@ -312,4 +312,52 @@ class TournamentRepositoryTest {
         assertTrue(after.getValue("W1_2").manualPlayer1Locked)
     }
 
+
+    @Test
+    fun winnersJoinAnOpponentWaitingInTheNextRoundForSmallMediumAndLargeBrackets() = runBlocking {
+        val configurations = listOf(
+            6 to "Malý pavouk",
+            9 to "Střední pavouk",
+            17 to "Velký pavouk"
+        )
+        var nextPlayerNumber = 1
+
+        for ((entrantCount, tournamentName) in configurations) {
+            repeat(entrantCount) {
+                repository.addPlayer("Hráč %02d".format(nextPlayerNumber++), null)
+            }
+            val ids = database.tournamentDao().getAllPlayersForBackup()
+                .take(nextPlayerNumber - 1)
+                .takeLast(entrantCount)
+                .map { it.id }
+            val tournamentId = repository.createAndStartTournament(
+                tournamentName, "2026-10-17", "", ids
+            )
+            val before = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+
+            // W1_2 finishes first and leaves a player waiting in W2_1. W1_0's
+            // designated target W2_0 is empty, but it must fill W2_1 instead.
+            repository.recordWinner(tournamentId, before.getValue("W1_2").matchNumber, ids[4])
+            Thread.sleep(5)
+            repository.recordWinner(tournamentId, before.getValue("W1_0").matchNumber, ids[0])
+
+            val after = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+            assertEquals(tournamentName, ids[4], after.getValue("W2_1").player1Id)
+            assertEquals(tournamentName, ids[0], after.getValue("W2_1").player2Id)
+            assertEquals(tournamentName, null, after.getValue("W2_0").player1Id)
+            assertEquals(tournamentName, null, after.getValue("W2_0").player2Id)
+            assertEquals(
+                after.getValue("W2_1").matchNumber,
+                after.getValue("W1_0").routedWinnerMatchNumber
+            )
+            assertEquals(
+                after.getValue("W2_1").matchNumber,
+                after.getValue("W1_2").routedWinnerMatchNumber
+            )
+
+            repository.deleteTournament(tournamentId)
+        }
+    }
+
+
 }
