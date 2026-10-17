@@ -452,11 +452,18 @@ class TournamentRepository(private val database: AppDatabase) {
             val directTwoPlayerFinal = match.matchKey == "G" && storedMatches.size == 1
             var p1: TournamentParticipantEntity? = null
             var p2: TournamentParticipantEntity? = null
-            if (match.winnerId != null) {
-                // A completed match is immutable history. Manual edits affect future slots only.
+            if (
+                match.winnerId != null &&
+                listOfNotNull(match.player1Id, match.player2Id).any { participantById[it]?.isWithdrawn == true }
+            ) {
+                // Preserve played history when a participant later withdraws.
+                // Otherwise, completed matches must be rebuilt from their feeder results so
+                // correcting an earlier result can invalidate a now-impossible matchup.
                 p1 = match.player1Id?.let(participantById::get)
                 p2 = match.player2Id?.let(participantById::get)
             } else if (openingIndex != null && match.branch == "WINNERS" && match.roundNumber == 1) {
+                // Rebuild opening matchups from current seeds, even when a result exists.
+                // Result replay below keeps the outcome only when both entrants still match.
                 p1 = participantBySeed[openingIndex * 2 + 1]
                     ?: previous.player1Id?.let(participantById::get)?.takeIf { previous.winnerId != null }
                 p2 = participantBySeed[openingIndex * 2 + 2]
@@ -464,13 +471,6 @@ class TournamentRepository(private val database: AppDatabase) {
             } else if (directTwoPlayerFinal) {
                 p1 = participants.getOrNull(0)
                 p2 = participants.getOrNull(1)
-            } else if (
-                match.winnerId != null &&
-                listOfNotNull(match.player1Id, match.player2Id).any { participantById[it]?.isWithdrawn == true }
-            ) {
-                // Keep all previously completed matchups intact if somebody later withdraws.
-                p1 = match.player1Id?.let(participantById::get)
-                p2 = match.player2Id?.let(participantById::get)
             }
 
             // An in-progress match can already contain players routed into dynamically
