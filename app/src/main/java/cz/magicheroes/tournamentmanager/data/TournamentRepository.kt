@@ -633,15 +633,17 @@ class TournamentRepository(private val database: AppDatabase) {
         // before. Replaying the current outcome decides the new route; a changed entrant then
         // invalidates downstream results rather than preserving a now-impossible progression.
 
-        // Every loser, regardless of the round or branch where they lost, returns
-        // to the opening round: first WINNERS round 1, then LOSERS round 1.
-        // If both opening branches are full, the player is eliminated.
-        val openingWinnerSeat = findNearestOpenSlot(
-            map, source, playerId, "WINNERS", previousByNumber, openingRoundOnly = true
+        // Extra chances are intentional: a loser may re-enter an opening-round slot.
+        // Prefer the branch where the loss happened, then fall back to the other branch.
+        // A WINNERS-branch loser therefore tries WINNERS round 1 first, then LOSERS round 1.
+        val preferredBranch = if (source.branch == "LOSERS") "LOSERS" else "WINNERS"
+        val fallbackBranch = if (preferredBranch == "WINNERS") "LOSERS" else "WINNERS"
+        val preferredSeat = findNearestOpenSlot(
+            map, source, playerId, preferredBranch, previousByNumber, openingRoundOnly = true
         )
-        if (openingWinnerSeat != null) return openingWinnerSeat
+        if (preferredSeat != null) return preferredSeat
         return findNearestOpenSlot(
-            map, source, playerId, "LOSERS", previousByNumber, openingRoundOnly = true
+            map, source, playerId, fallbackBranch, previousByNumber, openingRoundOnly = true
         )
     }
 
@@ -674,7 +676,13 @@ class TournamentRepository(private val database: AppDatabase) {
                     target.player1Id != playerId && target.player2Id != playerId
             }
             .sortedWith(
-                compareBy<Pair<MatchEntity, Int>> { kotlin.math.abs(it.first.roundNumber - source.roundNumber) }
+                // Pair a fresh entrant with someone already waiting before opening
+                // a completely empty match. This prevents earlier empty slots from
+                // making an opponent wait while another match could start immediately.
+                compareBy<Pair<MatchEntity, Int>> {
+                    if (it.first.player1Id != null || it.first.player2Id != null) 0 else 1
+                }
+                    .thenBy { kotlin.math.abs(it.first.roundNumber - source.roundNumber) }
                     .thenBy { it.first.matchNumber }
                     .thenBy { it.second }
             )
