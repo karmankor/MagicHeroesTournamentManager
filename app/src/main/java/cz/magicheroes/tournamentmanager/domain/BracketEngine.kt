@@ -55,18 +55,12 @@ object BracketEngine {
         }
 
         val losersByRound = mutableMapOf<Int, List<Blueprint>>()
-        // The opening losers round has the same number of matches as winners round 1.
-        // Capacities for the supported brackets are:
-        // size 8:  4, 2, 2, 1
-        // size 16: 8, 4, 4, 2, 2, 1
-        // size 32: 16, 8, 8, 4, 4, 2, 2, 1
-        // Later rounds shrink only when two lower-bracket matches feed one match.
-        val lowerRoundCount = 2 * (winnersRoundCount - 1)
+        // Keep both branches the same number of rounds. The opening round in
+        // each branch has the same capacity; later rounds halve until one final
+        // lower-bracket match remains (e.g. 4-2-1, 8-4-2-1, 16-8-4-2-1).
+        val lowerRoundCount = winnersRoundCount
         for (round in 1..lowerRoundCount) {
-            val count = when {
-                round == lowerRoundCount -> 1
-                else -> size shr ((round + 2) / 2)
-            }
+            val count = size shr (round + 1)
             val row = (0 until count).map { index ->
                 Blueprint("L${round}_${index}", round, "LOSERS")
             }
