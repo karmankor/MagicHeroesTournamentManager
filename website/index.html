@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#100e15">
+  <meta name="description" content="Veřejné turnaje, výsledky, hráčské profily a žebříčky Magic Heroes.">
+  <title>Magic Heroes — turnaje a žebříčky</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <header class="site-header">
+    <a class="brand" href="./" aria-label="Magic Heroes – úvod">
+      <span class="brand-mark">MH</span>
+      <span><strong>MAGIC HEROES</strong><small>TOURNAMENT ARCHIVE</small></span>
+    </a>
+    <span class="live-label"><span class="live-dot"></span> VEŘEJNÝ ARCHIV</span>
+  </header>
+  <main class="page-shell">
+    <section class="hero">
+      <div class="eyebrow">SÍŇ SLÁVY · VÝSLEDKY · RIVALITA</div>
+      <h1>Každá hra píše<br><span>svůj příběh.</span></h1>
+      <p>Procházej turnaje Magic Heroes, sleduj cestu pavoukem a objevuj hráče i klany v žebříčcích.</p>
+      <div class="hero-foot"><span class="hero-line"></span><span id="published-status">Načítám veřejná data…</span></div>
+    </section>
+    <section class="metrics" id="metrics" aria-label="Souhrn archivu"></section>
+    <nav class="tabs" aria-label="Obsah webu">
+      <button class="tab active" data-view="tournaments">Turnaje</button>
+      <button class="tab" data-view="players">Hráči</button>
+      <button class="tab" data-view="clans">Klany</button>
+      <button class="tab" data-view="leaderboard">Žebříčky</button>
+    </nav>
+    <section class="content-shell">
+      <div class="content-heading">
+        <div><div class="eyebrow" id="section-eyebrow">ARCHIV ZÁPASŮ</div><h2 id="section-title">Turnaje</h2></div>
+        <label class="search-box" id="search-box"><span>⌕</span><input id="search" type="search" placeholder="Hledat turnaj…" autocomplete="off"></label>
+      </div>
+      <div id="subnav"></div>
+      <div id="content" aria-live="polite"><div class="loading-card">Načítám data z veřejného archivu…</div></div>
+    </section>
+    <footer class="site-footer">
+      <div class="brand footer-brand"><span class="brand-mark">MH</span><span><strong>MAGIC HEROES</strong><small>TOURNAMENT MANAGER</small></span></div>
+      <p>Výsledky jsou poslední zveřejněnou verzí z turnajového manažeru.</p>
+      <span id="footer-updated">Offline-first · veřejný výřez dat</span>
+    </footer>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

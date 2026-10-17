@@ -14,6 +14,7 @@ Nativní aplikace pro Android v Kotlinu, Jetpack Compose a Room. Data zůstávaj
 - ruční úprava úvodních dvojic s potvrzením; změněné návazné výsledky, turnajové body a ELO se bezpečně přepočítají;
 - bezpečné odstoupení hráče: jeho odehrané zápasy zůstanou zachované a volné místo se uvolní bez posunutí ostatních dvojic;
 - offline PDF export turnaje, hráče a žebříčků přes systémový dialog pro uložení souboru;
+- veřejný webový archiv turnajů, detailů zápasů, hráčských profilů, klanů a žebříčků; zveřejnění se spouští ručně z aplikace;
 - záloha celé lokální databáze do JSON a obnova ze souboru; obnovení nejprve ověří zálohu a přepisuje data v jediné databázové transakci;
 - jednotkové testy bodování a plánu bracketu.
 
@@ -28,6 +29,38 @@ Zápas s jedním hráčem se **nevyhodnotí automaticky**. Pořadatel musí výs
 ELO začíná na 1000 a používá koeficient K = 32. Počítá se z odehraných vzájemných zápasů napříč turnaji, nikoli z celkového počtu výher, sérií nebo turnajových bodů. Oprava výsledku přepočítá ratingy z historie znovu; postup bez odehrané hry ELO nemění.
 
 V této verzi se používá jedno rozhodující velké finále bez dodatečného „reset finále“. Vítěz finále dostane 2 body za výhru a dalších 10 bonusových bodů. Tento model je zvolen jako výchozí implementace; pokud má vaše turnajová varianta jiné pevné rozmístění 32 zápasových pozic, reset finále nebo jiné přesuny poražených, je potřeba upravit plán v `domain/BracketEngine.kt` před ostrým používáním.
+
+
+## Veřejný turnajový web
+
+Webová část je ve složce `website/` a používá Supabase pro uložení jediné veřejné datové projekce. Cloudflare Pages (nebo jiné statické HTTPS hostování) obslouží web bez vlastního serveru. Lokální databáze telefonu zůstává hlavním zdrojem; změny se na webu objeví až po ručním zveřejnění v aplikaci.
+
+### První nastavení
+
+1. Vytvoř projekt v Supabase a v **SQL Editoru** spusť celý soubor `supabase/migrations/20261017000000_public_site_snapshot.sql`.
+2. V Supabase Authentication vytvoř účet správce a potvrď e-mail. Potom v SQL Editoru nastav tomuto účtu oprávnění k publikování (nahraď e-mail svým účtem):
+
+   ```sql
+   update auth.users
+   set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role":"publisher"}'::jsonb
+   where email = 'tvuj-email@example.com';
+   ```
+
+   Pro změnu je potřeba administrátorské oprávnění projektu Supabase. Role je v `app_metadata`, ne v uživatelsky měnitelných metadatech, takže ji běžný účet nemůže sám nastavit. Přihlas se v aplikaci až poté, co roli nastavíš.
+3. Zkopíruj Project URL a **publishable key** (případně starší `anon` key) ze Supabase. V aplikaci otevři tlačítko **Web**, vlož tyto dva údaje a přihlas se e-mailem a heslem účtu s rolí `publisher`. URL a veřejný klíč se uloží v telefonu; heslo se neukládá. Každé stisknutí **Publikovat data** nahraje aktuální verzi.
+4. Nahraď zástupné hodnoty v `website/config.js` Project URL a stejným veřejným publishable/anon klíčem.
+5. V Cloudflare Pages vytvoř projekt propojený s repozitářem. Nastav kořenový adresář `website`, build command `exit 0` a výstupní adresář `.`. Po sloučení této větve nastav produkční větev `main`. Cloudflare pak web automaticky nasazuje při dalších změnách.
+
+### Co se zveřejní
+
+Veřejný výřez obsahuje jména hráčů (včetně historických archivovaných profilů, na které odkazují starší zápasy), jejich klany, ELO a body, názvy a data turnajů, účastníky, stav turnaje a výsledky zápasů. Neobsahuje interní poznámky turnajů ani důvody ručních úprav bodů. Před prvním zveřejněním zkontroluj, že jména a výsledky mohou být veřejné. Web zobrazuje poslední zveřejněnou verzi, ne automatický živý přístup k databázi telefonu.
+
+### Bezpečnost
+
+- Veřejný web dostává pouze řádek `public.public_site_snapshot`; lokální aplikační tabulky nejsou veřejnému API zpřístupněny.
+- RLS povoluje čtení veřejného snapshotu všem, ale INSERT/UPDATE pouze přihlášeným uživatelům s oprávněním `app_metadata.role = publisher`.
+- V Androidu a ve `website/config.js` používej pouze veřejný publishable/anon klíč. **Nikdy** do aplikace, webu ani repozitáře nevkládej `service_role` nebo secret key.
+- Publikační heslo se neukládá; nahrávání vyžaduje internetové připojení.
 
 ## Otevření a sestavení v Android Studiu
 
@@ -71,6 +104,8 @@ MagicHeroesTournamentManager/
 │   │   ├── ui/         # ViewModel
 │   │   └── MainActivity.kt
 │   └── src/test/       # jednotkové testy
+├── supabase/migrations/  # schéma veřejného snapshotu a RLS politiky
+├── website/              # veřejný statický web
 ├── build.gradle.kts
 └── settings.gradle.kts
 ```
