@@ -87,8 +87,11 @@ object BracketEngine {
                     node.nextLoserKey = "L1_${index / 2}"
                     node.loserTargetSlot = index % 2
                 } else {
-                    val lowerRound = 2 * round - 2
-                    node.nextLoserKey = "L${lowerRound}_$index"
+                    // Losers from every winners-branch round are routed by the repository
+                    // into the first available opening slot. Keep the graph link within
+                    // the opening losers round; later-round-specific links would point
+                    // beyond the equal-depth bracket for smaller capacities.
+                    node.nextLoserKey = "L1_$index"
                     node.loserTargetSlot = 1
                 }
             }
