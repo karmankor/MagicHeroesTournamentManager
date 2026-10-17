@@ -100,7 +100,7 @@ class TournamentRepositoryTest {
         repository.promoteNextWaitlistedPlayer(tournamentId)
 
         val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
-        assertEquals(14, matches.size)
+        assertEquals(15, matches.size)
         assertEquals(ids[0], matches.getValue("W1_0").winnerId)
         // The defeated player stays in the nearest free winner-branch seat; the waitlisted
         // entrant fills the opponent's side of that now-active match.
@@ -212,6 +212,42 @@ class TournamentRepositoryTest {
         assertEquals(ids[1], after.getValue("W1_2").player1Id)
         assertEquals(null, after.getValue("L1_0").player1Id)
         assertEquals(after.getValue("W1_2").matchNumber, after.getValue("W1_0").routedLoserMatchNumber)
+    }
+
+    @Test
+    fun winnerBranchLoserJoinsWaitingOpponentBeforeUsingEarlierEmptyMatch() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Nejdřív čekající soupeř", "2026-10-17", "", ids)
+        val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+
+        // Moving Cyril to W1_3 leaves Dana waiting in W1_1 and W1_2 completely empty.
+        repository.setManualMatchSlot(tournamentId, matches.getValue("W1_3").matchNumber, 0, ids[2], true)
+        repository.recordWinner(tournamentId, matches.getValue("W1_0").matchNumber, ids[0])
+
+        val after = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(ids[1], after.getValue("W1_1").player1Id)
+        assertEquals(ids[3], after.getValue("W1_1").player2Id)
+        assertEquals(null, after.getValue("W1_2").player1Id)
+        assertEquals(null, after.getValue("W1_2").player2Id)
+    }
+
+    @Test
+    fun winnerBranchLoserUsesWaitingLosersSlotWhenAllWinnerOpeningSlotsAreOccupied() = runBlocking {
+        (1..8).forEach { repository.addPlayer("Hráč $it", null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Čekající soupeř v losers", "2026-10-17", "", ids)
+        val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+
+        // All winners opening slots are occupied. Keep the first loser's next seat waiting in L1_1.
+        repository.recordWinner(tournamentId, matches.getValue("W1_0").matchNumber, ids[0])
+        repository.setManualMatchSlot(tournamentId, matches.getValue("L1_1").matchNumber, 0, ids[1], true)
+        repository.recordWinner(tournamentId, matches.getValue("W1_1").matchNumber, ids[2])
+
+        val after = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(ids[1], after.getValue("L1_1").player1Id)
+        assertEquals(ids[3], after.getValue("L1_1").player2Id)
+        assertEquals(after.getValue("L1_1").matchNumber, after.getValue("W1_1").routedLoserMatchNumber)
     }
 
     @Test
