@@ -356,6 +356,7 @@ class TournamentRepositoryTest {
                 after.getValue("W1_2").routedWinnerMatchNumber
             )
 
+            repository.finishTournament(tournamentId)
             repository.deleteTournament(tournamentId)
         }
     }
