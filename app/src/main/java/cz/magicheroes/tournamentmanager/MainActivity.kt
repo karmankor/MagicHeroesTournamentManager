@@ -58,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
@@ -156,6 +157,12 @@ private fun MagicHeroesApp(vm: MainViewModel) {
     var selectedClanProfile by remember { mutableStateOf<Long?>(null) }
     var exportRequest by remember { mutableStateOf<PdfRequest?>(null) }
     var showRestoreConfirm by remember { mutableStateOf(false) }
+    val publishPrefs = remember { context.getSharedPreferences("public_site_settings", 0) }
+    var showPublishDialog by remember { mutableStateOf(false) }
+    var publishProjectUrl by remember { mutableStateOf(publishPrefs.getString("project_url", "") ?: "") }
+    var publishAnonKey by remember { mutableStateOf(publishPrefs.getString("publishable_key", "") ?: "") }
+    var publishEmail by remember { mutableStateOf("") }
+    var publishPassword by remember { mutableStateOf("") }
 
     val backupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) vm.exportBackup(uri)
@@ -194,6 +201,7 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                     }
                 },
                 actions = {
+                    TextButton(onClick = { showPublishDialog = true }) { Text("🌐 Web") }
                     if (busy) Text("Ukládám…", modifier = Modifier.padding(end = 12.dp), style = MaterialTheme.typography.labelSmall)
                 }
             )
@@ -307,6 +315,27 @@ private fun MagicHeroesApp(vm: MainViewModel) {
             }
         }
     }
+
+    if (showPublishDialog) PublicPublishDialog(
+        initialUrl = publishProjectUrl,
+        initialKey = publishAnonKey,
+        initialEmail = publishEmail,
+        initialPassword = publishPassword,
+        isBusy = busy,
+        onDismiss = { showPublishDialog = false },
+        onPublish = { projectUrl, publishableKey, email, password ->
+            publishProjectUrl = projectUrl.trim().trimEnd('/')
+            publishAnonKey = publishableKey.trim()
+            publishEmail = email.trim()
+            publishPrefs.edit()
+                .putString("project_url", publishProjectUrl)
+                .putString("publishable_key", publishAnonKey)
+                .apply()
+            vm.publishPublicSnapshot(publishProjectUrl, publishAnonKey, publishEmail, password)
+            publishPassword = ""
+            showPublishDialog = false
+        }
+    )
 
     if (showRestoreConfirm) ConfirmDialog(
         title = "Obnovit zálohu?",
@@ -1438,6 +1467,88 @@ private fun ClanPointsDialog(
                     onClick = { parsedAmount?.let { onSubmit(-it, reason) } }
                 ) { Text("− Odebrat") }
             }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
+    )
+}
+
+
+@Composable
+private fun PublicPublishDialog(
+    initialUrl: String,
+    initialKey: String,
+    initialEmail: String,
+    initialPassword: String,
+    isBusy: Boolean,
+    onDismiss: () -> Unit,
+    onPublish: (String, String, String, String) -> Unit
+) {
+    var projectUrl by remember { mutableStateOf(initialUrl) }
+    var publishableKey by remember { mutableStateOf(initialKey) }
+    var email by remember { mutableStateOf(initialEmail) }
+    var password by remember { mutableStateOf(initialPassword) }
+    val canPublish = projectUrl.startsWith("https://") &&
+        publishableKey.isNotBlank() && email.isNotBlank() && password.isNotBlank() && !isBusy
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Zveřejnit na web") },
+        text = {
+            Column(
+                Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    "Web je veřejný. Tato akce zveřejní aktuální jména hráčů, klany, ELO, turnaje, účastníky a výsledky zápasů.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Nezveřejňují se interní poznámky turnajů ani důvody ručních úprav bodů. Telefon zůstává hlavním úložištěm dat.",
+                    color = MaterialTheme.colorScheme.secondary,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                OutlinedTextField(
+                    value = projectUrl,
+                    onValueChange = { projectUrl = it.trim() },
+                    label = { Text("Supabase Project URL") },
+                    placeholder = { Text("https://projekt.supabase.co") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = publishableKey,
+                    onValueChange = { publishableKey = it.trim() },
+                    label = { Text("Veřejný publishable / anon klíč") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("E-mail správce") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Heslo správce") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "Přístupový token se používá pouze pro toto nahrání. Do aplikace nevkládej service-role ani secret key.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = canPublish,
+                onClick = { onPublish(projectUrl, publishableKey, email, password) }
+            ) { Text(if (isBusy) "Nahrávám…" else "Publikovat data") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
     )

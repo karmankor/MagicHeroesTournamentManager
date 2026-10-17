@@ -17,6 +17,9 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Check public website JavaScript
+        run: cd website && node --check app.js && node --check config.js
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
