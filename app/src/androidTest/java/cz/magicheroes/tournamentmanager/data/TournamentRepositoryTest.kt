@@ -276,4 +276,76 @@ class TournamentRepositoryTest {
         assertTrue(after.getValue("W1_2").manualPlayer1Locked)
     }
 
+
+    @Test
+    fun publicSnapshotIncludesTournamentDataButExcludesInternalNotesAndAdjustmentReasons() {
+        val clan = ClanEntity(id = 7, name = "Ravens")
+        val player = PlayerEntity(id = 11, name = "Ada", clanId = clan.id, eloRating = 1120)
+        val tournament = TournamentEntity(
+            id = 21,
+            name = "Podzimní turnaj",
+            dateIso = "2026-10-17",
+            note = "PRIVATE_INTERNAL_NOTE",
+            status = TournamentEntity.STATUS_FINISHED,
+            winnerId = player.id
+        )
+        val participant = TournamentParticipantEntity(
+            tournamentId = tournament.id,
+            playerId = player.id,
+            playerNameSnapshot = player.name,
+            clanIdSnapshot = clan.id,
+            clanNameSnapshot = clan.name,
+            seed = 1
+        )
+        val match = MatchEntity(
+            id = 31,
+            tournamentId = tournament.id,
+            matchNumber = 1,
+            matchKey = "W1_0",
+            roundNumber = 1,
+            branch = "WINNERS",
+            status = "COMPLETED",
+            player1Id = player.id,
+            player1NameSnapshot = player.name,
+            winnerId = player.id,
+            isTournamentFinal = false
+        )
+        val point = PointTransactionEntity(
+            playerId = player.id,
+            tournamentId = tournament.id,
+            points = 2,
+            reason = "SECRET_MATCH_NOTE",
+            clanIdSnapshot = clan.id,
+            clanNameSnapshot = clan.name
+        )
+        val adjustment = ClanPointAdjustmentEntity(
+            id = 1,
+            clanIdSnapshot = clan.id,
+            clanNameSnapshot = clan.name,
+            points = 5,
+            reason = "SECRET_ADJUSTMENT_REASON"
+        )
+
+        val json = PublicSnapshotBuilder.build(
+            clans = listOf(clan),
+            players = listOf(player),
+            tournaments = listOf(tournament),
+            participants = listOf(participant),
+            matches = listOf(match),
+            pointTransactions = listOf(point),
+            clanPointAdjustments = listOf(adjustment)
+        )
+        val serialized = json.toString()
+
+        assertTrue(serialized.contains("Podzimní turnaj"))
+        assertTrue(serialized.contains("Ada"))
+        assertTrue(serialized.contains("Ravens"))
+        assertTrue(serialized.contains("\"eloRating\":1120"))
+        assertTrue(serialized.contains("\"points\":2"))
+        assertTrue(serialized.contains("W1_0"))
+        assertTrue(!serialized.contains("PRIVATE_INTERNAL_NOTE"))
+        assertTrue(!serialized.contains("SECRET_MATCH_NOTE"))
+        assertTrue(!serialized.contains("SECRET_ADJUSTMENT_REASON"))
+    }
+
 }
