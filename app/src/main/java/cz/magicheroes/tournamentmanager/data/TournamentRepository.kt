@@ -465,9 +465,7 @@ class TournamentRepository(private val database: AppDatabase) {
                 // Rebuild opening matchups from current seeds, even when a result exists.
                 // Result replay below keeps the outcome only when both entrants still match.
                 p1 = participantBySeed[openingIndex * 2 + 1]
-                    ?: previous.player1Id?.let(participantById::get)?.takeIf { previous.winnerId != null }
                 p2 = participantBySeed[openingIndex * 2 + 2]
-                    ?: previous.player2Id?.let(participantById::get)?.takeIf { previous.winnerId != null }
             } else if (directTwoPlayerFinal) {
                 p1 = participants.getOrNull(0)
                 p2 = participants.getOrNull(1)
