@@ -362,4 +362,52 @@ class TournamentRepositoryTest {
     }
 
 
+
+    @Test
+    fun samePlayerCanParticipateInMultipleActiveTournaments() = runBlocking {
+        listOf("Michal", "Ada", "Borek", "Cyril").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().associateBy { it.name }
+        val firstTournament = repository.createAndStartTournament(
+            "Turnaj 1", "2026-10-20", "", listOf(ids.getValue("Michal").id, ids.getValue("Ada").id)
+        )
+        val secondTournament = repository.createAndStartTournament(
+            "Turnaj 2", "2026-10-20", "", listOf(ids.getValue("Michal").id, ids.getValue("Borek").id)
+        )
+
+        assertEquals(
+            setOf(ids.getValue("Michal").id, ids.getValue("Ada").id),
+            database.tournamentDao().getParticipants(firstTournament).map { it.playerId }.toSet()
+        )
+        assertEquals(
+            setOf(ids.getValue("Michal").id, ids.getValue("Borek").id),
+            database.tournamentDao().getParticipants(secondTournament).map { it.playerId }.toSet()
+        )
+
+        // A player already registered in another active tournament can also join this one’s waitlist.
+        repository.addPlayerToWaitlist(secondTournament, ids.getValue("Cyril").id)
+        assertTrue(database.tournamentDao().getParticipants(secondTournament).any {
+            it.playerId == ids.getValue("Cyril").id && it.isQueued
+        })
+    }
+
+    @Test
+    fun manualPlacementOfWinnerOverridesAutomaticRouteWithoutDuplicatingPlayer() = runBlocking {
+        listOf("Ada", "Borek", "Cyril", "Dana").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament("Ruční soupeř", "2026-10-20", "", ids)
+        val initial = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+
+        repository.recordWinner(tournamentId, initial.getValue("W1_0").matchNumber, ids[0])
+        repository.recordWinner(tournamentId, initial.getValue("W1_1").matchNumber, ids[2])
+        repository.setManualMatchSlot(tournamentId, initial.getValue("W2_1").matchNumber, 0, ids[0], true)
+
+        val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertEquals(ids[0], matches.getValue("W1_0").winnerId)
+        assertEquals(ids[2], matches.getValue("W1_1").winnerId)
+        assertEquals(ids[0], matches.getValue("W2_1").player1Id)
+        assertEquals(ids[2], matches.getValue("W2_1").player2Id)
+        assertEquals(1, matches.values.count { it.winnerId == null && (it.player1Id == ids[0] || it.player2Id == ids[0]) })
+        assertEquals(4, database.tournamentDao().getPointsForTournament(tournamentId).sumOf { it.points })
+    }
+
 }
