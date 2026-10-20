@@ -8,14 +8,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BracketEngineTest {
+    // Regression coverage for symmetric branch depth and opening-round capacity.
     private fun entrants(count: Int) = (1..count).map { Entrant(it.toLong(), "Hráč $it", null, null) }
 
-    @Test fun eightPlayersCreateFixedDoubleEliminationGraph() {
+    @Test fun eightPlayersCreatePreparedGraphWithMatchingOpeningRounds() {
         val matches = BracketEngine.createPlan(10, entrants(8))
-        assertEquals(14, matches.size) // 7 winner branch + 6 loser branch + grand final
+        assertEquals(15, matches.size)
         assertEquals(4, matches.count { it.branch == "WINNERS" && it.roundNumber == 1 })
-        assertEquals(6, matches.count { it.branch == "LOSERS" })
+        assertEquals(4, matches.count { it.branch == "LOSERS" && it.roundNumber == 1 })
+        assertEquals(7, matches.count { it.branch == "LOSERS" })
         assertEquals(1, matches.count { it.isTournamentFinal })
+        assertEquals(matches.filter { it.branch == "WINNERS" }.maxOf { it.roundNumber }, matches.filter { it.branch == "LOSERS" }.maxOf { it.roundNumber })
         assertTrue(matches.filter { it.branch == "WINNERS" && it.roundNumber == 1 }.all { it.player1Id != null && it.player2Id != null })
     }
 
@@ -30,7 +33,10 @@ class BracketEngineTest {
 
     @Test fun graphIsAcyclicAndEveryNodeCanBeOrdered() {
         val matches = BracketEngine.createPlan(12, entrants(32))
-        assertEquals(62, matches.size)
+        assertEquals(63, matches.size)
+        assertEquals(listOf(16, 8, 4, 2, 1), (1..5).map { round ->
+            matches.count { it.branch == "LOSERS" && it.roundNumber == round }
+        })
         assertEquals(matches.size, BracketEngine.topologicalOrder(matches).size)
         assertTrue(matches.all { it.nextWinnerMatchNumber == null || matches.any { m -> m.matchNumber == it.nextWinnerMatchNumber } })
         assertTrue(matches.all { it.nextLoserMatchNumber == null || matches.any { m -> m.matchNumber == it.nextLoserMatchNumber } })
@@ -38,17 +44,22 @@ class BracketEngineTest {
 
     @Test fun bracketsUsePreparedSmallMediumAndLargeCapacities() {
         val small = BracketEngine.createPlan(20, entrants(2))
-        assertEquals(14, small.size)
+        assertEquals(15, small.size)
         assertEquals(4, small.count { it.branch == "WINNERS" && it.roundNumber == 1 })
+        assertEquals(4, small.count { it.branch == "LOSERS" && it.roundNumber == 1 })
         assertEquals(3, small.count { it.branch == "WINNERS" && it.roundNumber == 1 && it.player2Id == null })
 
         val medium = BracketEngine.createPlan(21, entrants(9))
-        assertEquals(30, medium.size)
+        assertEquals(31, medium.size)
         assertEquals(8, medium.count { it.branch == "WINNERS" && it.roundNumber == 1 })
+        assertEquals(8, medium.count { it.branch == "LOSERS" && it.roundNumber == 1 })
 
         val large = BracketEngine.createPlan(22, entrants(17))
-        assertEquals(62, large.size)
+        assertEquals(63, large.size)
         assertEquals(16, large.count { it.branch == "WINNERS" && it.roundNumber == 1 })
+        assertEquals(16, large.count { it.branch == "LOSERS" && it.roundNumber == 1 })
+        assertEquals(5, large.filter { it.branch == "WINNERS" }.maxOf { it.roundNumber })
+        assertEquals(5, large.filter { it.branch == "LOSERS" }.maxOf { it.roundNumber })
     }
 
     @Test fun duplicatePlayerIdsAreRejected() {
@@ -60,6 +71,7 @@ class BracketEngineTest {
             assertNotEquals("", expected.message)
         }
     }
+
     @Test fun changingEitherEntrantInvalidatesOldMatchResult() {
         val previous = MatchEntity(
             tournamentId = 3,
@@ -85,7 +97,23 @@ class BracketEngineTest {
             assertEquals(matches.size, matches.map { it.matchNumber }.distinct().size)
             assertTrue(matches.all { it.player1Id == null || it.player1Id in (1L..count.toLong()) })
             assertTrue(matches.all { it.player2Id == null || it.player2Id in (1L..count.toLong()) })
+            val capacity = when {
+                count <= 8 -> 8
+                count <= 16 -> 16
+                else -> 32
+            }
+            val roundCount = when (capacity) {
+                8 -> 3
+                16 -> 4
+                else -> 5
+            }
+            assertEquals(roundCount, matches.filter { it.branch == "WINNERS" }.maxOf { it.roundNumber })
+            assertEquals(roundCount, matches.filter { it.branch == "LOSERS" }.maxOf { it.roundNumber })
+            for (round in 1..roundCount) {
+                val expectedMatches = capacity shr round
+                assertEquals(expectedMatches, matches.count { it.branch == "WINNERS" && it.roundNumber == round })
+                assertEquals(expectedMatches, matches.count { it.branch == "LOSERS" && it.roundNumber == round })
+            }
         }
     }
-
 }

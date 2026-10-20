@@ -55,16 +55,17 @@ object BracketEngine {
         }
 
         val losersByRound = mutableMapOf<Int, List<Blueprint>>()
-        for (pairIndex in 0 until winnersRoundCount - 1) {
-            val count = size shr (pairIndex + 2)
-            val oddRound = pairIndex * 2 + 1
-            val evenRound = oddRound + 1
-            val oddNodes = (0 until count).map { Blueprint("L${oddRound}_$it", oddRound, "LOSERS") }
-            val evenNodes = (0 until count).map { Blueprint("L${evenRound}_$it", evenRound, "LOSERS") }
-            losersByRound[oddRound] = oddNodes
-            losersByRound[evenRound] = evenNodes
-            nodes += oddNodes
-            nodes += evenNodes
+        // Keep both branches the same number of rounds. The opening round in
+        // each branch has the same capacity; later rounds halve until one final
+        // lower-bracket match remains (e.g. 4-2-1, 8-4-2-1, 16-8-4-2-1).
+        val lowerRoundCount = winnersRoundCount
+        for (round in 1..lowerRoundCount) {
+            val count = size shr round
+            val row = (0 until count).map { index ->
+                Blueprint("L${round}_${index}", round, "LOSERS")
+            }
+            losersByRound[round] = row
+            nodes += row
         }
 
         val finalNode = Blueprint("G", winnersRoundCount + 1, "FINAL", final = true)
@@ -83,35 +84,36 @@ object BracketEngine {
                 }
 
                 if (round == 1) {
-                    node.nextLoserKey = "L1_${index / 2}"
-                    node.loserTargetSlot = index % 2
+                    // Give every opening winners match its own prepared losers match.
+                    node.nextLoserKey = "L1_$index"
+                    node.loserTargetSlot = 0
                 } else {
-                    val lowerRound = 2 * round - 2
-                    node.nextLoserKey = "L${lowerRound}_$index"
+                    // Losers from every winners-branch round are routed by the repository
+                    // into the first available opening slot. Keep the graph link within
+                    // the opening losers round; later-round-specific links would point
+                    // beyond the equal-depth bracket for smaller capacities.
+                    node.nextLoserKey = "L1_$index"
                     node.loserTargetSlot = 1
                 }
             }
         }
 
-        // Losers branch: odd rounds pair lower-bracket winners; even rounds receive
-        // the matching winners plus the loser falling from the next winners round.
-        val lowerRoundCount = 2 * (winnersRoundCount - 1)
+        // Connect lower-bracket winners according to the actual next-round capacity.
+        // When the next round is smaller, pairs feed its two slots; when capacities
+        // are equal, each winner advances into a separate waiting match.
         for (round in 1..lowerRoundCount) {
             val row = losersByRound.getValue(round)
+            val nextRow = losersByRound[round + 1]
             row.forEachIndexed { index, node ->
-                when {
-                    round == lowerRoundCount -> {
-                        node.nextWinnerKey = "G"
-                        node.winnerTargetSlot = 1
-                    }
-                    round % 2 == 1 -> {
-                        node.nextWinnerKey = "L${round + 1}_$index"
-                        node.winnerTargetSlot = 0
-                    }
-                    else -> {
-                        node.nextWinnerKey = "L${round + 1}_${index / 2}"
-                        node.winnerTargetSlot = index % 2
-                    }
+                if (round == lowerRoundCount) {
+                    node.nextWinnerKey = "G"
+                    node.winnerTargetSlot = 1
+                } else if (nextRow != null && nextRow.size < row.size) {
+                    node.nextWinnerKey = "L${round + 1}_${index / 2}"
+                    node.winnerTargetSlot = index % 2
+                } else {
+                    node.nextWinnerKey = "L${round + 1}_${index}"
+                    node.winnerTargetSlot = 0
                 }
             }
         }

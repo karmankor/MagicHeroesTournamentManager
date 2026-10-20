@@ -91,11 +91,7 @@ class TournamentRepository(private val database: AppDatabase) {
         val uniqueIds = playerIds.distinct()
         require(uniqueIds.size in 2..32) { "Vyber 2 až 32 různých hráčů." }
 
-        val activeTournaments = dao.getTournaments().filter { it.status == TournamentEntity.STATUS_ACTIVE }
-        val activePlayers = activeTournaments.flatMap { dao.getParticipants(it.id).filterNot { participant -> participant.isWithdrawn } }.map { it.playerId }.toSet()
-        require(uniqueIds.none { it in activePlayers }) {
-            "Některý z vybraných hráčů už je v jiném aktivním turnaji."
-        }
+        // A player may participate in multiple active tournaments; membership is scoped by tournamentId.
 
         val playersById = dao.getPlayers().associateBy { it.id }
         val clansById = dao.getClans().associateBy { it.id }
@@ -131,9 +127,7 @@ class TournamentRepository(private val database: AppDatabase) {
         require(!player.isArchived) { "Archivovaného hráče nelze přidat do turnaje." }
         val participants = dao.getParticipants(tournamentId)
         require(participants.none { it.playerId == playerId }) { "Hráč už je účastníkem nebo čeká ve frontě." }
-        val activeTournamentIds = dao.getTournaments().filter { it.status == TournamentEntity.STATUS_ACTIVE }.map { it.id }
-        val alreadyPlaying = activeTournamentIds.any { id -> dao.getParticipants(id).any { it.playerId == playerId && !it.isWithdrawn } }
-        require(!alreadyPlaying) { "Hráč už je přihlášený do jiného aktivního turnaje." }
+        // Cross-tournament participation is allowed; duplicate membership within this tournament is checked above.
         val clan = player.clanId?.let { dao.getClan(it) }
         dao.insertParticipants(listOf(TournamentParticipantEntity(
             tournamentId = tournamentId,
@@ -452,25 +446,23 @@ class TournamentRepository(private val database: AppDatabase) {
             val directTwoPlayerFinal = match.matchKey == "G" && storedMatches.size == 1
             var p1: TournamentParticipantEntity? = null
             var p2: TournamentParticipantEntity? = null
-            if (match.winnerId != null) {
-                // A completed match is immutable history. Manual edits affect future slots only.
-                p1 = match.player1Id?.let(participantById::get)
-                p2 = match.player2Id?.let(participantById::get)
-            } else if (openingIndex != null && match.branch == "WINNERS" && match.roundNumber == 1) {
-                p1 = participantBySeed[openingIndex * 2 + 1]
-                    ?: previous.player1Id?.let(participantById::get)?.takeIf { previous.winnerId != null }
-                p2 = participantBySeed[openingIndex * 2 + 2]
-                    ?: previous.player2Id?.let(participantById::get)?.takeIf { previous.winnerId != null }
-            } else if (directTwoPlayerFinal) {
-                p1 = participants.getOrNull(0)
-                p2 = participants.getOrNull(1)
-            } else if (
+            if (
                 match.winnerId != null &&
                 listOfNotNull(match.player1Id, match.player2Id).any { participantById[it]?.isWithdrawn == true }
             ) {
-                // Keep all previously completed matchups intact if somebody later withdraws.
+                // Preserve played history when a participant later withdraws.
+                // Otherwise, completed matches must be rebuilt from their feeder results so
+                // correcting an earlier result can invalidate a now-impossible matchup.
                 p1 = match.player1Id?.let(participantById::get)
                 p2 = match.player2Id?.let(participantById::get)
+            } else if (openingIndex != null && match.branch == "WINNERS" && match.roundNumber == 1) {
+                // Rebuild opening matchups from current seeds, even when a result exists.
+                // Result replay below keeps the outcome only when both entrants still match.
+                p1 = participantBySeed[openingIndex * 2 + 1]
+                p2 = participantBySeed[openingIndex * 2 + 2]
+            } else if (directTwoPlayerFinal) {
+                p1 = participants.getOrNull(0)
+                p2 = participants.getOrNull(1)
             }
 
             // An in-progress match can already contain players routed into dynamically
@@ -602,22 +594,9 @@ class TournamentRepository(private val database: AppDatabase) {
     ): Int? {
         if (source.isTournamentFinal) return null
 
-        // Winners always advance to their designated next round. Never divert a winner
-        // into an arbitrary open slot just because the normal next-round seat is unavailable.
-        if (!isLoser) {
-            val targetNumber = source.nextWinnerMatchNumber
-            val targetSlot = source.winnerTargetSlot
-            if (targetNumber != null && targetSlot != null &&
-                assignPlayerToSlot(
-                    map, targetNumber, targetSlot, playerId,
-                    participantName(map, previousByNumber, playerId), false
-                )
-            ) return targetNumber
-            return null
-        }
-
-        // Manual placements can override a loser's automatic destination, but never skip a
-        // winner's required next round.
+        // A manual placement is authoritative for either winner or loser. Route the
+        // player to that explicitly chosen future slot instead of also auto-placing them
+        // in a feeder match, which could duplicate the player and corrupt the bracket.
         val manual = latestManualByPlayer[playerId]
         if (manual != null && manual.matchNumber != source.matchNumber) {
             val target = map[manual.matchNumber]
@@ -629,19 +608,51 @@ class TournamentRepository(private val database: AppDatabase) {
             ) return manual.matchNumber
         }
 
+        // Winners and lower-branch winners advance one round at a time. In that next
+        // round, first join a match where an opponent is already waiting. Only if there
+        // is no such match do we use the pre-planned feeder match, then another empty seat.
+        // This prevents a waiting player from being skipped just because their original
+        // feeder finished later.
+        if (!isLoser) {
+            val targetNumber = source.nextWinnerMatchNumber
+            val plannedTarget = targetNumber?.let(map::get)
+            if (plannedTarget?.branch == "FINAL") {
+                val targetSlot = source.winnerTargetSlot
+                if (targetNumber != null && targetSlot != null &&
+                    assignPlayerToSlot(
+                        map, targetNumber, targetSlot, playerId,
+                        participantName(map, previousByNumber, playerId), false
+                    )
+                ) return targetNumber
+                return null
+            }
+
+            return findNearestOpenSlot(
+                map = map,
+                source = source,
+                playerId = playerId,
+                branch = source.branch,
+                previousByNumber = previousByNumber,
+                targetRound = source.roundNumber + 1,
+                preferredMatchNumber = targetNumber
+            )
+        }
+
         // Do not reuse an old dynamic destination merely because this player appeared there
         // before. Replaying the current outcome decides the new route; a changed entrant then
         // invalidates downstream results rather than preserving a now-impossible progression.
 
-        // Every loser, regardless of the round or branch where they lost, returns
-        // to the opening round: first WINNERS round 1, then LOSERS round 1.
-        // If both opening branches are full, the player is eliminated.
-        val openingWinnerSeat = findNearestOpenSlot(
-            map, source, playerId, "WINNERS", previousByNumber, openingRoundOnly = true
+        // Extra chances are intentional: a loser may re-enter an opening-round slot.
+        // Prefer the branch where the loss happened, then fall back to the other branch.
+        // A WINNERS-branch loser therefore tries WINNERS round 1 first, then LOSERS round 1.
+        val preferredBranch = if (source.branch == "LOSERS") "LOSERS" else "WINNERS"
+        val fallbackBranch = if (preferredBranch == "WINNERS") "LOSERS" else "WINNERS"
+        val preferredSeat = findNearestOpenSlot(
+            map, source, playerId, preferredBranch, previousByNumber, openingRoundOnly = true
         )
-        if (openingWinnerSeat != null) return openingWinnerSeat
+        if (preferredSeat != null) return preferredSeat
         return findNearestOpenSlot(
-            map, source, playerId, "LOSERS", previousByNumber, openingRoundOnly = true
+            map, source, playerId, fallbackBranch, previousByNumber, openingRoundOnly = true
         )
     }
 
@@ -651,7 +662,9 @@ class TournamentRepository(private val database: AppDatabase) {
         playerId: Long,
         branch: String,
         previousByNumber: Map<Int, MatchEntity>,
-        openingRoundOnly: Boolean = false
+        openingRoundOnly: Boolean = false,
+        targetRound: Int? = null,
+        preferredMatchNumber: Int? = null
     ): Int? {
         val sourceOpponent = source.winnerId
         val candidates = map.values.asSequence()
@@ -659,6 +672,7 @@ class TournamentRepository(private val database: AppDatabase) {
                 target.matchNumber != source.matchNumber &&
                     target.branch == branch &&
                     (!openingRoundOnly || target.roundNumber == 1) &&
+                    (targetRound == null || target.roundNumber == targetRound) &&
                     !target.isTournamentFinal &&
                     target.selectedWinnerId == null &&
                     target.winnerId == null &&
@@ -674,7 +688,14 @@ class TournamentRepository(private val database: AppDatabase) {
                     target.player1Id != playerId && target.player2Id != playerId
             }
             .sortedWith(
-                compareBy<Pair<MatchEntity, Int>> { kotlin.math.abs(it.first.roundNumber - source.roundNumber) }
+                // A match with one player waiting is always more urgent than an empty
+                // match. If several candidates are waiting, keep the planned feeder as
+                // the first tie-breaker; otherwise preserve the planned path where possible.
+                compareBy<Pair<MatchEntity, Int>> {
+                    if (it.first.player1Id != null || it.first.player2Id != null) 0 else 1
+                }
+                    .thenBy { if (it.first.matchNumber == preferredMatchNumber) 0 else 1 }
+                    .thenBy { kotlin.math.abs(it.first.roundNumber - (targetRound ?: source.roundNumber)) }
                     .thenBy { it.first.matchNumber }
                     .thenBy { it.second }
             )
