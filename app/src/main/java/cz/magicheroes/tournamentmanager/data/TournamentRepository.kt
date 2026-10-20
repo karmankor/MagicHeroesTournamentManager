@@ -91,11 +91,7 @@ class TournamentRepository(private val database: AppDatabase) {
         val uniqueIds = playerIds.distinct()
         require(uniqueIds.size in 2..32) { "Vyber 2 až 32 různých hráčů." }
 
-        val activeTournaments = dao.getTournaments().filter { it.status == TournamentEntity.STATUS_ACTIVE }
-        val activePlayers = activeTournaments.flatMap { dao.getParticipants(it.id).filterNot { participant -> participant.isWithdrawn } }.map { it.playerId }.toSet()
-        require(uniqueIds.none { it in activePlayers }) {
-            "Některý z vybraných hráčů už je v jiném aktivním turnaji."
-        }
+        // A player may participate in multiple active tournaments; membership is scoped by tournamentId.
 
         val playersById = dao.getPlayers().associateBy { it.id }
         val clansById = dao.getClans().associateBy { it.id }
@@ -131,9 +127,7 @@ class TournamentRepository(private val database: AppDatabase) {
         require(!player.isArchived) { "Archivovaného hráče nelze přidat do turnaje." }
         val participants = dao.getParticipants(tournamentId)
         require(participants.none { it.playerId == playerId }) { "Hráč už je účastníkem nebo čeká ve frontě." }
-        val activeTournamentIds = dao.getTournaments().filter { it.status == TournamentEntity.STATUS_ACTIVE }.map { it.id }
-        val alreadyPlaying = activeTournamentIds.any { id -> dao.getParticipants(id).any { it.playerId == playerId && !it.isWithdrawn } }
-        require(!alreadyPlaying) { "Hráč už je přihlášený do jiného aktivního turnaje." }
+        // Cross-tournament participation is allowed; duplicate membership within this tournament is checked above.
         val clan = player.clanId?.let { dao.getClan(it) }
         dao.insertParticipants(listOf(TournamentParticipantEntity(
             tournamentId = tournamentId,
@@ -600,6 +594,20 @@ class TournamentRepository(private val database: AppDatabase) {
     ): Int? {
         if (source.isTournamentFinal) return null
 
+        // A manual placement is authoritative for either winner or loser. Route the
+        // player to that explicitly chosen future slot instead of also auto-placing them
+        // in a feeder match, which could duplicate the player and corrupt the bracket.
+        val manual = latestManualByPlayer[playerId]
+        if (manual != null && manual.matchNumber != source.matchNumber) {
+            val target = map[manual.matchNumber]
+            if (target != null && target.selectedWinnerId == null && target.winnerId == null &&
+                assignPlayerToSlot(
+                    map, manual.matchNumber, manual.slot, playerId,
+                    participantName(map, previousByNumber, playerId), allowRecordedResult = false
+                )
+            ) return manual.matchNumber
+        }
+
         // Winners and lower-branch winners advance one round at a time. In that next
         // round, first join a match where an opponent is already waiting. Only if there
         // is no such match do we use the pre-planned feeder match, then another empty seat.
@@ -628,19 +636,6 @@ class TournamentRepository(private val database: AppDatabase) {
                 targetRound = source.roundNumber + 1,
                 preferredMatchNumber = targetNumber
             )
-        }
-
-        // Manual placements can override a loser's automatic destination, but never skip a
-        // winner's required next round.
-        val manual = latestManualByPlayer[playerId]
-        if (manual != null && manual.matchNumber != source.matchNumber) {
-            val target = map[manual.matchNumber]
-            if (target != null && target.selectedWinnerId == null && target.winnerId == null &&
-                assignPlayerToSlot(
-                    map, manual.matchNumber, manual.slot, playerId,
-                    participantName(map, previousByNumber, playerId), allowRecordedResult = false
-                )
-            ) return manual.matchNumber
         }
 
         // Do not reuse an old dynamic destination merely because this player appeared there
