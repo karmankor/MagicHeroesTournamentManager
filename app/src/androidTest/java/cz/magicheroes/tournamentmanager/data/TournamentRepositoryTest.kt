@@ -383,10 +383,10 @@ class TournamentRepositoryTest {
             database.tournamentDao().getParticipants(secondTournament).map { it.playerId }.toSet()
         )
 
-        // A player already registered in another active tournament can also join this one’s waitlist.
-        repository.addPlayerToWaitlist(secondTournament, ids.getValue("Cyril").id)
+        // Ada is already playing in Turnaj 1 and can also join Turnaj 2's waitlist.
+        repository.addPlayerToWaitlist(secondTournament, ids.getValue("Ada").id)
         assertTrue(database.tournamentDao().getParticipants(secondTournament).any {
-            it.playerId == ids.getValue("Cyril").id && it.isQueued
+            it.playerId == ids.getValue("Ada").id && it.isQueued
         })
     }
 
