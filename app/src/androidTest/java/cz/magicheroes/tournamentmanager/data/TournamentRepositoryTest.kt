@@ -469,25 +469,29 @@ class TournamentRepositoryTest {
         repository.addPlayerToWaitlist(tournamentId, ids[8])
 
         var matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
-        val lateSeat = matches.getValue("L1_2")
-        assertEquals(null, lateSeat.player1Id)
+        val lateSeat = matches.values.first { match ->
+            match.branch == "LOSERS" && match.roundNumber == 1 &&
+                match.winnerId == null && match.selectedWinnerId == null &&
+                match.player1Id == null && match.player2Id == null
+        }
+        val lateSeatKey = lateSeat.matchKey
         repository.setManualMatchSlot(tournamentId, lateSeat.matchNumber, 0, ids[8], true)
 
         matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
-        assertEquals(ids[8], matches.getValue("L1_2").player1Id)
+        assertEquals(ids[8], matches.getValue(lateSeatKey).player1Id)
         assertTrue((0..3).all { matches.getValue("W1_$it").winnerId == ids[it * 2] })
 
         // A later result in another match used to trigger a rebuild that wiped results.
         repository.recordWinner(tournamentId, matches.getValue("L1_0").matchNumber, ids[1])
         matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
-        repository.recordWinner(tournamentId, matches.getValue("L1_2").matchNumber, ids[8])
+        repository.recordWinner(tournamentId, matches.getValue(lateSeatKey).matchNumber, ids[8])
 
         matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
         listOf("W1_0", "W1_1", "W1_2", "W1_3").forEachIndexed { index, key ->
             assertEquals(ids[index * 2], matches.getValue(key).winnerId)
         }
         assertEquals(ids[1], matches.getValue("L1_0").winnerId)
-        assertEquals(ids[8], matches.getValue("L1_2").winnerId)
+        assertEquals(ids[8], matches.getValue(lateSeatKey).winnerId)
         assertEquals(
             1,
             matches.values.count { it.winnerId == null && (it.player1Id == ids[8] || it.player2Id == ids[8]) }
