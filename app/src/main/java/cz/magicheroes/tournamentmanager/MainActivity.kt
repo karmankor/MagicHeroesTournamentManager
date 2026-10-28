@@ -230,8 +230,8 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                     playerElo = { id -> allPlayers.firstOrNull { it.id == id }?.eloRating ?: 1000 },
                     points = points.filter { it.tournamentId == activeTournament.id },
                     onBack = { selectedTournamentId = null; vm.closeTournament() },
-                    onAddExistingPlayer = { vm.addPlayerToWaitlist(activeTournament.id, it) },
-                    onAddNewPlayer = { vm.createPlayerInWaitlist(activeTournament.id, it) },
+                    onAddExistingPlayer = { vm.addPlayerToTournamentOrWaitlist(activeTournament.id, it) },
+                    onAddNewPlayer = { vm.createPlayerInTournamentOrWaitlist(activeTournament.id, it) },
                     onPromoteNext = { vm.promoteNextWaitlistedPlayer(activeTournament.id) },
                     onStartMatch = { vm.startMatch(activeTournament.id, it) },
                     onWinner = { matchNumber, winnerId -> vm.recordWinner(activeTournament.id, matchNumber, winnerId) },
@@ -750,7 +750,7 @@ private fun TournamentDetailScreen(
         if (tournament.note.isNotBlank()) Text(tournament.note, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (tournament.status == TournamentEntity.STATUS_ACTIVE) {
             OutlinedButton(onClick = { showWaitlistDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                Text("+ Přidat hráče do čekací fronty")
+                Text("+ Přidat hráče do turnaje")
             }
         }
         if (queued.isNotEmpty()) {
@@ -1278,10 +1278,10 @@ private fun WaitlistDialog(
     val selected = availablePlayers.firstOrNull { it.id == selectedId }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Přidat do čekací fronty") },
+        title = { Text("Přidat hráče do turnaje") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Vyber existujícího hráče, nebo zadej nového.")
+                Text("Vyber existujícího hráče, nebo zadej nového. Pokud je volné místo ve vítězné větvi, dostane ho přednostně; jinak se zkusí poraženecká větev. Když jsou obě plné, hráč zůstane ve čekací frontě.")
                 Box {
                     OutlinedButton(onClick = { showPlayers = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(selected?.name ?: "Vybrat existujícího hráče")
@@ -1310,7 +1310,7 @@ private fun WaitlistDialog(
             Button(
                 onClick = { if (newName.isNotBlank()) onAddNew(newName.trim()) else selectedId?.let(onAddExisting) },
                 enabled = newName.isNotBlank() || selectedId != null
-            ) { Text("Přidat do fronty") }
+            ) { Text("Přidat hráče") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
     )
