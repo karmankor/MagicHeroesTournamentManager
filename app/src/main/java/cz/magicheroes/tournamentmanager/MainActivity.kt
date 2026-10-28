@@ -760,9 +760,11 @@ private fun TournamentDetailScreen(
             val hasFreeOpeningSlot = listOf("WINNERS", "LOSERS").any { branch ->
                 matches.filter { it.branch == branch && it.roundNumber == 1 }.any { match ->
                     val firstAvailable = match.player1Id == null &&
-                        (!match.manualPlayer1Locked || match.manualPlayer1Id in queuedIds)
+                        (!match.manualPlayer1Locked ||
+                            (match.manualPlayer1Id != null && match.manualPlayer1Id in queuedIds))
                     val secondAvailable = match.player2Id == null &&
-                        (!match.manualPlayer2Locked || match.manualPlayer2Id in queuedIds)
+                        (!match.manualPlayer2Locked ||
+                            (match.manualPlayer2Id != null && match.manualPlayer2Id in queuedIds))
                     (firstAvailable || secondAvailable) && match.winnerId == null &&
                         match.selectedWinnerId == null && !match.byeConfirmed && match.status != "IN_PROGRESS"
                 }
