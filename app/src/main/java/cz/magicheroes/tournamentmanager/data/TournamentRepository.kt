@@ -160,24 +160,54 @@ class TournamentRepository(private val database: AppDatabase) {
     suspend fun promoteNextWaitlistedPlayer(tournamentId: Long) = database.withTransaction {
         val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
         require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Hráče lze zařadit do bracketu jen během aktivního turnaje." }
-        val participants = dao.getParticipants(tournamentId)
-        val queued = participants.filter { it.isQueued }.minByOrNull { it.seed }
+        val queued = dao.getParticipants(tournamentId).filter { it.isQueued }.minByOrNull { it.seed }
             ?: error("Čekací fronta je prázdná.")
-        val active = participants.filterNot { it.isQueued || it.isWithdrawn }
         val matches = dao.getMatches(tournamentId)
-        val openingMatches = matches.filter { it.branch == "WINNERS" && it.roundNumber == 1 }
-        val capacity = openingMatches.size * 2
-        val occupiedSeeds = active.map { it.seed }.toSet()
-        val targetSeed = (1..capacity).firstOrNull { seed ->
-            if (seed in occupiedSeeds) return@firstOrNull false
-            val key = "W1_${(seed - 1) / 2}"
-            val target = openingMatches.firstOrNull { it.matchKey == key } ?: return@firstOrNull false
-            val slotPlayerId = if ((seed - 1) % 2 == 0) target.player1Id else target.player2Id
-            slotPlayerId == null && target.winnerId == null && target.selectedWinnerId == null &&
-                !target.byeConfirmed && target.status != "IN_PROGRESS"
-        } ?: error("V bracketu teď není volné, neodehrané místo pro dalšího hráče.")
-        dao.updateParticipant(queued.copy(isQueued = false, isWithdrawn = false, seed = targetSeed))
-        rebuildBracket(tournamentId)
+
+        // Try all safe opening-round seats in the winners branch first. If none remain,
+        // fall back to the losers branch. Join a waiting opponent before opening a blank match.
+        val target = listOf("WINNERS", "LOSERS").firstNotNullOfOrNull { branch ->
+            matches.asSequence()
+                .filter { it.branch == branch && it.roundNumber == 1 }
+                .flatMap { match -> sequenceOf(0, 1).map { slot -> match to slot } }
+                .filter { (match, slot) ->
+                    val slotPlayerId = if (slot == 0) match.player1Id else match.player2Id
+                    val locked = if (slot == 0) match.manualPlayer1Locked else match.manualPlayer2Locked
+                    val manualId = if (slot == 0) match.manualPlayer1Id else match.manualPlayer2Id
+                    slotPlayerId == null && (!locked || manualId == queued.playerId) &&
+                        match.winnerId == null && match.selectedWinnerId == null &&
+                        !match.byeConfirmed && match.status != "IN_PROGRESS"
+                }
+                .sortedWith(
+                    compareBy<Pair<MatchEntity, Int>> { (match, _) ->
+                        if (match.player1Id != null || match.player2Id != null) 0 else 1
+                    }.thenBy { it.first.matchNumber }.thenBy { it.second }
+                )
+                .firstOrNull()
+        } ?: error("V úvodním kole vítězné ani poraženecké větve není volná neodehraná pozice.")
+
+        val (targetMatch, slot) = target
+        dao.updateParticipant(queued.copy(isQueued = false, isWithdrawn = false))
+        val now = System.currentTimeMillis()
+        val updatedTarget = if (slot == 0) {
+            targetMatch.copy(
+                player1Id = queued.playerId,
+                player1NameSnapshot = queued.playerNameSnapshot,
+                manualPlayer1Locked = true,
+                manualPlayer1Id = queued.playerId,
+                manualPlayer1AssignedAt = now
+            )
+        } else {
+            targetMatch.copy(
+                player2Id = queued.playerId,
+                player2NameSnapshot = queued.playerNameSnapshot,
+                manualPlayer2Locked = true,
+                manualPlayer2Id = queued.playerId,
+                manualPlayer2AssignedAt = now
+            )
+        }
+        dao.updateMatch(updatedTarget)
+        rebuildBracket(tournamentId, preserveAssignments = true)
     }
 
     /** Swap the opening-round seeds of two players in different first-round matches. */
@@ -218,12 +248,14 @@ class TournamentRepository(private val database: AppDatabase) {
         val matches = dao.getMatches(tournamentId)
         val target = matches.firstOrNull { it.matchNumber == matchNumber } ?: error("Zápas neexistuje.")
         val previousSlotPlayerId = if (slot == 0) target.player1Id else target.player2Id
+        var safeQueuedPlacement = false
         require(target.winnerId == null && target.selectedWinnerId == null && target.status != "IN_PROGRESS") {
             "Obsazení lze měnit jen v neodehraném a nerozehraném zápase."
         }
         if (playerId != null) {
             val participant = dao.getParticipants(tournamentId).firstOrNull { it.playerId == playerId }
                 ?: error("Vybraný hráč není účastníkem turnaje.")
+            safeQueuedPlacement = participant.isQueued && previousSlotPlayerId == null
             require(!participant.isWithdrawn) { "Odstoupivšího hráče nelze znovu umístit." }
             require(matches.none { it.status == "IN_PROGRESS" && (it.player1Id == playerId || it.player2Id == playerId) }) {
                 "Hráč právě hraje rozehraný zápas. Nejprve ho dokonči."
@@ -296,7 +328,7 @@ class TournamentRepository(private val database: AppDatabase) {
             )
         }
         dao.updateMatch(updatedTarget)
-        rebuildBracket(tournamentId)
+        rebuildBracket(tournamentId, preserveAssignments = safeQueuedPlacement)
         rebuildPoints(tournamentId)
         rebuildEloRatings()
     }
@@ -371,8 +403,9 @@ class TournamentRepository(private val database: AppDatabase) {
             ?: error("Zápas neexistuje.")
         val solo = listOfNotNull(match.player1Id, match.player2Id).singleOrNull()
             ?: error("Tento zápas nemá přesně jednoho hráče bez soupeře.")
-        dao.updateMatch(match.copy(selectedWinnerId = solo, byeConfirmed = true, completedAt = System.currentTimeMillis()))
-        rebuildBracket(tournamentId)
+        val isCorrection = match.winnerId != null && match.winnerId != solo
+        dao.updateMatch(match.copy(selectedWinnerId = solo, byeConfirmed = true, completedAt = match.completedAt ?: System.currentTimeMillis()))
+        rebuildBracket(tournamentId, preserveAssignments = !isCorrection)
         rebuildPoints(tournamentId)
         rebuildEloRatings()
     }
@@ -412,9 +445,15 @@ class TournamentRepository(private val database: AppDatabase) {
         val assignedAt: Long
     )
 
-    private suspend fun rebuildBracket(tournamentId: Long) {
+    private suspend fun rebuildBracket(tournamentId: Long, preserveAssignments: Boolean = false) {
         val storedMatches = dao.getMatches(tournamentId)
         val previousByNumber = storedMatches.associateBy { it.matchNumber }
+        // If a previously completed match has a different selected winner, treat it as an
+        // intentional result correction. A late entrant or a new result should not trigger
+        // the destructive full replay used for corrections.
+        val preserveCurrentAssignments = preserveAssignments && storedMatches.none {
+            it.winnerId != null && it.selectedWinnerId != null && it.winnerId != it.selectedWinnerId
+        }
         val participants = dao.getParticipants(tournamentId).filterNot { it.isQueued }.sortedBy { it.seed }
         val participantById = participants.associateBy { it.playerId }
         val manualPlacements = storedMatches.flatMap { match ->
@@ -440,64 +479,82 @@ class TournamentRepository(private val database: AppDatabase) {
                 opening.winnerId == null
         }.associateBy { it.seed }
 
-        val working = storedMatches.associate { match ->
-            val previous = previousByNumber[match.matchNumber] ?: match
-            val openingIndex = match.matchKey.removePrefix("W1_").toIntOrNull()
-            val directTwoPlayerFinal = match.matchKey == "G" && storedMatches.size == 1
-            var p1: TournamentParticipantEntity? = null
-            var p2: TournamentParticipantEntity? = null
-            if (
-                match.winnerId != null &&
-                listOfNotNull(match.player1Id, match.player2Id).any { participantById[it]?.isWithdrawn == true }
-            ) {
-                // Preserve played history when a participant later withdraws.
-                // Otherwise, completed matches must be rebuilt from their feeder results so
-                // correcting an earlier result can invalidate a now-impossible matchup.
-                p1 = match.player1Id?.let(participantById::get)
-                p2 = match.player2Id?.let(participantById::get)
-            } else if (openingIndex != null && match.branch == "WINNERS" && match.roundNumber == 1) {
-                // Rebuild opening matchups from current seeds, even when a result exists.
-                // Result replay below keeps the outcome only when both entrants still match.
-                p1 = participantBySeed[openingIndex * 2 + 1]
-                p2 = participantBySeed[openingIndex * 2 + 2]
-            } else if (directTwoPlayerFinal) {
-                p1 = participants.getOrNull(0)
-                p2 = participants.getOrNull(1)
-            }
-
-            // An in-progress match can already contain players routed into dynamically
-            // chosen slots. Preserve that exact pairing during unrelated recalculations.
-            if (match.status == "IN_PROGRESS" && match.selectedWinnerId == null) {
-                p1 = match.player1Id?.let(participantById::get)
-                p2 = match.player2Id?.let(participantById::get)
-            }
-            if (match.manualPlayer1Locked) p1 = match.manualPlayer1Id?.let(participantById::get)
-            if (match.manualPlayer2Locked) p2 = match.manualPlayer2Id?.let(participantById::get)
-            val sameCurrentEntrants = BracketEngine.hasSameEntrants(match, p1?.playerId, p2?.playerId)
-            match.matchNumber to match.copy(
-                player1Id = p1?.playerId,
-                player1NameSnapshot = p1?.playerNameSnapshot,
-                player2Id = p2?.playerId,
-                player2NameSnapshot = p2?.playerNameSnapshot,
-                selectedWinnerId = null,
-                winnerId = null,
-                loserId = null,
-                byeConfirmed = false,
-                completedAt = null,
-                routedWinnerMatchNumber = null,
-                routedLoserMatchNumber = null,
-                status = when {
-                    match.status == "IN_PROGRESS" && sameCurrentEntrants -> "IN_PROGRESS"
-                    p1 != null && p2 != null -> "READY"
-                    p1 != null || p2 != null -> "WAITING_FOR_OPPONENT"
-                    else -> "WAITING_FOR_PLAYERS"
+        val working = if (preserveCurrentAssignments) {
+            // Safe append/result: retain every current pairing and completed result.
+            // Only newly submitted outcomes are processed in the replay loop below.
+            storedMatches.associate { match ->
+                val pendingOutcome = match.selectedWinnerId != null && match.winnerId == null
+                match.matchNumber to if (pendingOutcome) {
+                    match.copy(
+                        winnerId = null,
+                        loserId = null,
+                        routedWinnerMatchNumber = null,
+                        routedLoserMatchNumber = null,
+                        status = when {
+                            match.player1Id != null && match.player2Id != null -> "READY"
+                            match.player1Id != null || match.player2Id != null -> "WAITING_FOR_OPPONENT"
+                            else -> "WAITING_FOR_PLAYERS"
+                        }
+                    )
+                } else match
+            }.toMutableMap()
+        } else {
+            storedMatches.associate { match ->
+                val openingIndex = match.matchKey.removePrefix("W1_").toIntOrNull()
+                val directTwoPlayerFinal = match.matchKey == "G" && storedMatches.size == 1
+                var p1: TournamentParticipantEntity? = null
+                var p2: TournamentParticipantEntity? = null
+                if (
+                    match.winnerId != null &&
+                    listOfNotNull(match.player1Id, match.player2Id).any { participantById[it]?.isWithdrawn == true }
+                ) {
+                    // Preserve played history when a participant later withdraws.
+                    p1 = match.player1Id?.let(participantById::get)
+                    p2 = match.player2Id?.let(participantById::get)
+                } else if (openingIndex != null && match.branch == "WINNERS" && match.roundNumber == 1) {
+                    p1 = participantBySeed[openingIndex * 2 + 1]
+                    p2 = participantBySeed[openingIndex * 2 + 2]
+                } else if (directTwoPlayerFinal) {
+                    p1 = participants.getOrNull(0)
+                    p2 = participants.getOrNull(1)
                 }
-            )
-        }.toMutableMap()
+
+                // An in-progress match keeps its exact pairing while results are corrected.
+                if (match.status == "IN_PROGRESS" && match.selectedWinnerId == null) {
+                    p1 = match.player1Id?.let(participantById::get)
+                    p2 = match.player2Id?.let(participantById::get)
+                }
+                if (match.manualPlayer1Locked) p1 = match.manualPlayer1Id?.let(participantById::get)
+                if (match.manualPlayer2Locked) p2 = match.manualPlayer2Id?.let(participantById::get)
+                val sameCurrentEntrants = BracketEngine.hasSameEntrants(match, p1?.playerId, p2?.playerId)
+                match.matchNumber to match.copy(
+                    player1Id = p1?.playerId,
+                    player1NameSnapshot = p1?.playerNameSnapshot,
+                    player2Id = p2?.playerId,
+                    player2NameSnapshot = p2?.playerNameSnapshot,
+                    selectedWinnerId = null,
+                    winnerId = null,
+                    loserId = null,
+                    byeConfirmed = false,
+                    completedAt = null,
+                    routedWinnerMatchNumber = null,
+                    routedLoserMatchNumber = null,
+                    status = when {
+                        match.status == "IN_PROGRESS" && sameCurrentEntrants -> "IN_PROGRESS"
+                        p1 != null && p2 != null -> "READY"
+                        p1 != null || p2 != null -> "WAITING_FOR_OPPONENT"
+                        else -> "WAITING_FOR_PLAYERS"
+                    }
+                )
+            }.toMutableMap()
+        }
 
         // Replaying chronologically allows outcomes to use a nearby open slot without
         // contradicting a follow-up match which has already been played.
         val results = storedMatches.filter { it.selectedWinnerId != null }
+            // Stable results already have persisted pairings/routes in preserve mode.
+            // Replaying them could move unrelated opponents after a late entrant is added.
+            .let { rows -> if (preserveCurrentAssignments) rows.filter { it.winnerId == null } else rows }
             .sortedWith(compareBy<MatchEntity> { it.completedAt ?: Long.MAX_VALUE }.thenBy { it.matchNumber })
 
         for (saved in results) {
