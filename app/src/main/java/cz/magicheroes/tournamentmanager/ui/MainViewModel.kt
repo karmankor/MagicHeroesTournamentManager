@@ -101,6 +101,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.createPlayerInWaitlist(tournamentId, name)
     }
 
+    fun addPlayerToTournamentOrWaitlist(tournamentId: Long, playerId: Long) =
+        perform("Hráč byl přidán: volné místo dostalo přednost, jinak čeká ve frontě.") {
+            repository.addPlayerToTournamentOrWaitlist(tournamentId, playerId)
+        }
+
+    fun createPlayerInTournamentOrWaitlist(tournamentId: Long, name: String) =
+        perform("Nový hráč byl přidán: volné místo dostalo přednost, jinak čeká ve frontě.") {
+            repository.createPlayerInTournamentOrWaitlist(tournamentId, name)
+        }
+
     fun promoteNextWaitlistedPlayer(tournamentId: Long) = perform("Další čekající hráč byl zařazen do volného místa v bracketu.") {
         repository.promoteNextWaitlistedPlayer(tournamentId)
     }
