@@ -754,16 +754,20 @@ private fun TournamentDetailScreen(
             }
         }
         if (queued.isNotEmpty()) {
-            val openingMatches = matches.filter { it.branch == "WINNERS" && it.roundNumber == 1 }
-            val occupiedSeeds = activeParticipants.map { it.seed }.toSet()
-            val promotionSeed = (1..(openingMatches.size * 2)).firstOrNull { seed ->
-                if (seed in occupiedSeeds) return@firstOrNull false
-                val target = openingMatches.firstOrNull { it.matchKey == "W1_${(seed - 1) / 2}" } ?: return@firstOrNull false
-                val slotPlayer = if ((seed - 1) % 2 == 0) target.player1Id else target.player2Id
-                slotPlayer == null && target.winnerId == null && target.selectedWinnerId == null &&
-                    !target.byeConfirmed && target.status != "IN_PROGRESS"
+            val queuedIds = queued.map { it.playerId }.toSet()
+            // Keep promotion available when winners are full but a safe opening seat
+            // is still free in the losers branch.
+            val hasFreeOpeningSlot = listOf("WINNERS", "LOSERS").any { branch ->
+                matches.filter { it.branch == branch && it.roundNumber == 1 }.any { match ->
+                    val firstAvailable = match.player1Id == null &&
+                        (!match.manualPlayer1Locked || match.manualPlayer1Id in queuedIds)
+                    val secondAvailable = match.player2Id == null &&
+                        (!match.manualPlayer2Locked || match.manualPlayer2Id in queuedIds)
+                    (firstAvailable || secondAvailable) && match.winnerId == null &&
+                        match.selectedWinnerId == null && !match.byeConfirmed && match.status != "IN_PROGRESS"
+                }
             }
-            val canPromote = tournament.status == TournamentEntity.STATUS_ACTIVE && promotionSeed != null
+            val canPromote = tournament.status == TournamentEntity.STATUS_ACTIVE && hasFreeOpeningSlot
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("ČEKACÍ FRONTA", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
@@ -774,8 +778,8 @@ private fun TournamentDetailScreen(
                         Text("Zařadit dalšího do volného pole")
                     }
                     Text(
-                        if (canPromote) "Další čekající bude zařazen bez změny dosavadních výsledků."
-                        else "Čekající hráče lze zařadit, až bude v bracketu bezpečně volné místo.",
+                        if (canPromote) "Nejdřív se využije volné místo ve vítězné větvi; pokud není, hráč se zařadí do poraženecké. Odehrané výsledky zůstanou zachovány."
+                        else "V obou úvodních větvích teď není volná neodehraná pozice.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
