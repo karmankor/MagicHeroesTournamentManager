@@ -498,4 +498,67 @@ class TournamentRepositoryTest {
         )
     }
 
+
+    @Test
+    fun addingLateEntrantAutomaticallyUsesWinnersThenLosersAndKeepsResults() = runBlocking {
+        (1..10).forEach { repository.addPlayer("Automatický pozdní $it", null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament(
+            "Automatické pozdní zařazení", "2026-10-28", "", ids.take(8)
+        )
+
+        // Complete the four original winners-opening matches, leaving no winners seat.
+        listOf("W1_0", "W1_1", "W1_2", "W1_3").forEachIndexed { index, key ->
+            val match = database.tournamentDao().getMatches(tournamentId).first { it.matchKey == key }
+            repository.recordWinner(tournamentId, match.matchNumber, ids[index * 2])
+        }
+
+        // Existing player: the UI action should immediately place them in the losers branch.
+        repository.addPlayerToTournamentOrWaitlist(tournamentId, ids[8])
+        var matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertTrue(matches.values.any { match ->
+            match.branch == "LOSERS" && match.roundNumber == 1 &&
+                (match.player1Id == ids[8] || match.player2Id == ids[8])
+        })
+        assertTrue(!database.tournamentDao().getParticipants(tournamentId).single { it.playerId == ids[8] }.isQueued)
+
+        // A newly created profile also joins immediately and pairs with the waiting entrant.
+        repository.createPlayerInTournamentOrWaitlist(tournamentId, "Nový pozdní hráč")
+        val newId = database.tournamentDao().getPlayers().first { it.name == "Nový pozdní hráč" }.id
+        matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertTrue(matches.values.any { match ->
+            match.branch == "LOSERS" && match.roundNumber == 1 &&
+                setOf(match.player1Id, match.player2Id) == setOf(ids[8], newId)
+        })
+        assertTrue(!database.tournamentDao().getParticipants(tournamentId).single { it.playerId == newId }.isQueued)
+
+        // More results after the placements must not erase earlier results.
+        repository.recordWinner(tournamentId, matches.getValue("L1_0").matchNumber, ids[1])
+        matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        listOf("W1_0", "W1_1", "W1_2", "W1_3").forEachIndexed { index, key ->
+            assertEquals(ids[index * 2], matches.getValue(key).winnerId)
+        }
+        assertEquals(ids[1], matches.getValue("L1_0").winnerId)
+    }
+
+    @Test
+    fun immediateLateEntrantStillPrefersAnOpenWinnersSlot() = runBlocking {
+        listOf("Ada", "Borek", "Cyril").forEach { repository.addPlayer(it, null) }
+        val ids = database.tournamentDao().getPlayers().map { it.id }
+        val tournamentId = repository.createAndStartTournament(
+            "Přednost vítězné větve", "2026-10-28", "", ids.take(2)
+        )
+
+        repository.addPlayerToTournamentOrWaitlist(tournamentId, ids[2])
+
+        val matches = database.tournamentDao().getMatches(tournamentId).associateBy { it.matchKey }
+        assertTrue(matches.values.any { match ->
+            match.branch == "WINNERS" && match.roundNumber == 1 &&
+                (match.player1Id == ids[2] || match.player2Id == ids[2])
+        })
+        assertTrue(matches.values.none { match ->
+            match.branch == "LOSERS" && (match.player1Id == ids[2] || match.player2Id == ids[2])
+        })
+    }
+
 }
