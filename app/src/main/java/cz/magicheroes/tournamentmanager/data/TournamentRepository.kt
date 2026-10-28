@@ -139,6 +139,48 @@ class TournamentRepository(private val database: AppDatabase) {
             isQueued = true
         )))
     }
+    
+    /**
+     * Add a player straight to the first safe open seat (winners first, then losers).
+     * If both opening lines are full, keep the participant on the waiting list.
+     */
+    suspend fun addPlayerToTournamentOrWaitlist(tournamentId: Long, playerId: Long) = database.withTransaction {
+        val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
+        require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Hráče lze přidat jen do aktivního turnaje." }
+        val player = dao.getPlayer(playerId) ?: error("Hráč už neexistuje.")
+        require(!player.isArchived) { "Archivovaného hráče nelze přidat do turnaje." }
+        val participants = dao.getParticipants(tournamentId)
+        require(participants.none { it.playerId == playerId }) { "Hráč už je účastníkem nebo čeká ve frontě." }
+        val clan = player.clanId?.let { dao.getClan(it) }
+        dao.insertParticipants(listOf(TournamentParticipantEntity(
+            tournamentId = tournamentId,
+            playerId = player.id,
+            playerNameSnapshot = player.name,
+            clanIdSnapshot = clan?.id,
+            clanNameSnapshot = clan?.name,
+            seed = (participants.maxOfOrNull { it.seed } ?: 0) + 1,
+            isQueued = true
+        )))
+        placeQueuedParticipantIfPossible(tournamentId, playerId)
+    }
+
+    suspend fun createPlayerInTournamentOrWaitlist(tournamentId: Long, name: String) = database.withTransaction {
+        val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
+        require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Hráče lze přidat jen do aktivního turnaje." }
+        val clean = name.trim()
+        require(clean.isNotEmpty()) { "Zadej jméno hráče." }
+        require(clean.length <= 60) { "Jméno může mít nejvýše 60 znaků." }
+        val playerId = dao.insertPlayer(PlayerEntity(name = clean))
+        val participants = dao.getParticipants(tournamentId)
+        dao.insertParticipants(listOf(TournamentParticipantEntity(
+            tournamentId = tournamentId,
+            playerId = playerId,
+            playerNameSnapshot = clean,
+            seed = (participants.maxOfOrNull { it.seed } ?: 0) + 1,
+            isQueued = true
+        )))
+        placeQueuedParticipantIfPossible(tournamentId, playerId)
+    }
 
     suspend fun createPlayerInWaitlist(tournamentId: Long, name: String) = database.withTransaction {
         val tournament = dao.getTournament(tournamentId) ?: error("Turnaj neexistuje.")
@@ -162,10 +204,19 @@ class TournamentRepository(private val database: AppDatabase) {
         require(tournament.status == TournamentEntity.STATUS_ACTIVE) { "Hráče lze zařadit do bracketu jen během aktivního turnaje." }
         val queued = dao.getParticipants(tournamentId).filter { it.isQueued }.minByOrNull { it.seed }
             ?: error("Čekací fronta je prázdná.")
+        check(placeQueuedParticipantIfPossible(tournamentId, queued.playerId)) {
+            "V úvodním kole vítězné ani poraženecké větve není volná neodehraná pozice."
+        }
+    }
+
+    private suspend fun placeQueuedParticipantIfPossible(tournamentId: Long, playerId: Long): Boolean {
+        val queued = dao.getParticipants(tournamentId).firstOrNull {
+            it.playerId == playerId && it.isQueued && !it.isWithdrawn
+        } ?: return false
         val matches = dao.getMatches(tournamentId)
 
-        // Try all safe opening-round seats in the winners branch first. If none remain,
-        // fall back to the losers branch. Join a waiting opponent before opening a blank match.
+        // Winners opening slots have priority. When they're full, use a losers opening slot.
+        // In either branch, pair with a waiting opponent before choosing an empty match.
         val target = listOf("WINNERS", "LOSERS").firstNotNullOfOrNull { branch ->
             matches.asSequence()
                 .filter { it.branch == branch && it.roundNumber == 1 }
@@ -184,7 +235,7 @@ class TournamentRepository(private val database: AppDatabase) {
                     }.thenBy { it.first.matchNumber }.thenBy { it.second }
                 )
                 .firstOrNull()
-        } ?: error("V úvodním kole vítězné ani poraženecké větve není volná neodehraná pozice.")
+        } ?: return false
 
         val (targetMatch, slot) = target
         dao.updateParticipant(queued.copy(isQueued = false, isWithdrawn = false))
@@ -208,6 +259,7 @@ class TournamentRepository(private val database: AppDatabase) {
         }
         dao.updateMatch(updatedTarget)
         rebuildBracket(tournamentId, preserveAssignments = true)
+        return true
     }
 
     /** Swap the opening-round seeds of two players in different first-round matches. */
