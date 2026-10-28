@@ -382,6 +382,7 @@ class TournamentRepository(private val database: AppDatabase) {
         }
         val match = dao.getMatches(tournamentId).firstOrNull { it.matchNumber == matchNumber }
             ?: error("Zápas neexistuje.")
+        val isCorrection = match.winnerId != null && match.winnerId != winnerId
         require(match.player1Id != null && match.player2Id != null) { "Zápas nemá oba hráče. Použij výslovný postup bez zápasu, pokud ho chceš potvrdit." }
         require(winnerId == match.player1Id || winnerId == match.player2Id) { "Vítěz musí být jedním z hráčů tohoto zápasu." }
         dao.updateMatch(match.copy(
@@ -389,7 +390,7 @@ class TournamentRepository(private val database: AppDatabase) {
             byeConfirmed = false,
             completedAt = match.completedAt ?: System.currentTimeMillis()
         ))
-        rebuildBracket(tournamentId)
+        rebuildBracket(tournamentId, preserveAssignments = !isCorrection)
         rebuildPoints(tournamentId)
         rebuildEloRatings()
     }
