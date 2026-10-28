@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
 import cz.magicheroes.tournamentmanager.data.AppDatabase
 import cz.magicheroes.tournamentmanager.data.DatabaseBackup
+import cz.magicheroes.tournamentmanager.data.PublicSnapshotBuilder
+import cz.magicheroes.tournamentmanager.data.PublicSitePublisher
 import cz.magicheroes.tournamentmanager.data.ClanEntity
 import cz.magicheroes.tournamentmanager.data.ClanPointAdjustmentEntity
 import cz.magicheroes.tournamentmanager.data.MatchEntity
@@ -99,6 +101,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.createPlayerInWaitlist(tournamentId, name)
     }
 
+    fun addPlayerToTournamentOrWaitlist(tournamentId: Long, playerId: Long) =
+        perform("Hráč byl přidán: volné místo dostalo přednost, jinak čeká ve frontě.") {
+            repository.addPlayerToTournamentOrWaitlist(tournamentId, playerId)
+        }
+
+    fun createPlayerInTournamentOrWaitlist(tournamentId: Long, name: String) =
+        perform("Nový hráč byl přidán: volné místo dostalo přednost, jinak čeká ve frontě.") {
+            repository.createPlayerInTournamentOrWaitlist(tournamentId, name)
+        }
+
     fun promoteNextWaitlistedPlayer(tournamentId: Long) = perform("Další čekající hráč byl zařazen do volného místa v bracketu.") {
         repository.promoteNextWaitlistedPlayer(tournamentId)
     }
@@ -138,6 +150,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.deleteTournament(tournamentId)
         if (selectedTournamentId.value == tournamentId) selectedTournamentId.value = null
     }
+
+    fun publishPublicSnapshot(projectUrl: String, publishableKey: String, email: String, password: String) =
+        perform("Veřejná data byla úspěšně publikována.") {
+            val snapshot = PublicSnapshotBuilder.build(
+                clans = dao.getClans(),
+                players = dao.getAllPlayersForBackup(),
+                tournaments = dao.getAllTournamentsForBackup(),
+                participants = dao.getAllParticipantsForBackup(),
+                matches = dao.getAllMatchesForBackup(),
+                pointTransactions = dao.getAllPointTransactionsForBackup(),
+                clanPointAdjustments = dao.getAllClanPointAdjustmentsForBackup()
+            )
+            PublicSitePublisher.publish(projectUrl, publishableKey, email, password, snapshot)
+        }
 
     fun exportBackup(uri: Uri) = perform("Záloha byla bezpečně uložena.") {
         DatabaseBackup.export(database, getApplication<Application>().contentResolver, uri)

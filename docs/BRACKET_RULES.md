@@ -2,8 +2,8 @@
 
 1. Podporováno je 2–32 jedinečných hráčů. Pořadí výběru hráčů určuje úvodní páry.
 2. Kapacita se předem vyhradí podle počtu hráčů: 2–8 účastníků = 8 míst, 9–16 = 16 míst, 17–32 = 32 míst. Prázdné úvodní pozice zůstávají k dispozici pro pozdě příchozí hráče, dokud jejich zápas není odehrán nebo výslovně potvrzen postup bez zápasu.
-3. Vítězná a poraženecká větev se připraví jako acyklický graf. Všechny návaznosti včetně cílových slotů jsou vytvořené před potvrzením prvního výsledku.
-4. Z vítězné větve postupuje vítěz do dalšího kola a poražený do poraženecké větve. V poraženecké větvi se poražení dále neposouvají.
+3. Vítězná a poraženecká větev se připraví jako acyklický graf se stejným počtem kol a stejnou kapacitou v každém odpovídajícím kole (malá 4–2–1, střední 8–4–2–1, velká 16–8–4–2–1 zápasů po kolech). Všechny návaznosti včetně cílových slotů jsou vytvořené před potvrzením prvního výsledku.
+4. Vítěz postupuje do stejné větve o jedno kolo dál: nejprve se páruje do zápasu dalšího kola, v němž už čeká soupeř, a teprve poté do prázdného zápasu. Plánovaný slot je prvním tie-breakerem, pokud více zápasů čeká na soupeře. Vítěz posledního kola větve postupuje do příslušného slotu finále. Poražený se dynamicky znovu zařazuje do úvodního kola větve podle pravidel opakovaných šancí.
 5. Zápas s jediným hráčem zůstává čekající. Pořadatel může explicitně potvrdit postup bez zápasu, který nepřidává turnajové body ani ELO.
 6. Každý odehraný zápas má právě jednoho vítěze z dvojice hráčů. Remízy nejsou povolené.
 7. Výhra se započítá jednou: 2 body. Výhra v rozhodujícím finále přidá dalších 10 bodů. Zápis bodů se při každé změně výsledku sestaví znovu v transakci, takže se neopakují.

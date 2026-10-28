@@ -58,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
@@ -156,6 +157,11 @@ private fun MagicHeroesApp(vm: MainViewModel) {
     var selectedClanProfile by remember { mutableStateOf<Long?>(null) }
     var exportRequest by remember { mutableStateOf<PdfRequest?>(null) }
     var showRestoreConfirm by remember { mutableStateOf(false) }
+    val publishPrefs = remember { context.getSharedPreferences("public_site_settings", 0) }
+    var showPublishDialog by remember { mutableStateOf(false) }
+    var publishProjectUrl by remember { mutableStateOf(publishPrefs.getString("project_url", "") ?: "") }
+    var publishAnonKey by remember { mutableStateOf(publishPrefs.getString("publishable_key", "") ?: "") }
+    var publishEmail by remember { mutableStateOf("") }
 
     val backupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) vm.exportBackup(uri)
@@ -194,6 +200,7 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                     }
                 },
                 actions = {
+                    TextButton(onClick = { showPublishDialog = true }) { Text("🌐 Web") }
                     if (busy) Text("Ukládám…", modifier = Modifier.padding(end = 12.dp), style = MaterialTheme.typography.labelSmall)
                 }
             )
@@ -223,8 +230,8 @@ private fun MagicHeroesApp(vm: MainViewModel) {
                     playerElo = { id -> allPlayers.firstOrNull { it.id == id }?.eloRating ?: 1000 },
                     points = points.filter { it.tournamentId == activeTournament.id },
                     onBack = { selectedTournamentId = null; vm.closeTournament() },
-                    onAddExistingPlayer = { vm.addPlayerToWaitlist(activeTournament.id, it) },
-                    onAddNewPlayer = { vm.createPlayerInWaitlist(activeTournament.id, it) },
+                    onAddExistingPlayer = { vm.addPlayerToTournamentOrWaitlist(activeTournament.id, it) },
+                    onAddNewPlayer = { vm.createPlayerInTournamentOrWaitlist(activeTournament.id, it) },
                     onPromoteNext = { vm.promoteNextWaitlistedPlayer(activeTournament.id) },
                     onStartMatch = { vm.startMatch(activeTournament.id, it) },
                     onWinner = { matchNumber, winnerId -> vm.recordWinner(activeTournament.id, matchNumber, winnerId) },
@@ -307,6 +314,25 @@ private fun MagicHeroesApp(vm: MainViewModel) {
             }
         }
     }
+
+    if (showPublishDialog) PublicPublishDialog(
+        initialUrl = publishProjectUrl,
+        initialKey = publishAnonKey,
+        initialEmail = publishEmail,
+        isBusy = busy,
+        onDismiss = { showPublishDialog = false },
+        onPublish = { projectUrl, publishableKey, email, password ->
+            publishProjectUrl = projectUrl.trim().trimEnd('/')
+            publishAnonKey = publishableKey.trim()
+            publishEmail = email.trim()
+            publishPrefs.edit()
+                .putString("project_url", publishProjectUrl)
+                .putString("publishable_key", publishAnonKey)
+                .apply()
+            vm.publishPublicSnapshot(publishProjectUrl, publishAnonKey, publishEmail, password)
+            showPublishDialog = false
+        }
+    )
 
     if (showRestoreConfirm) ConfirmDialog(
         title = "Obnovit zálohu?",
@@ -724,20 +750,26 @@ private fun TournamentDetailScreen(
         if (tournament.note.isNotBlank()) Text(tournament.note, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (tournament.status == TournamentEntity.STATUS_ACTIVE) {
             OutlinedButton(onClick = { showWaitlistDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                Text("+ Přidat hráče do čekací fronty")
+                Text("+ Přidat hráče do turnaje")
             }
         }
         if (queued.isNotEmpty()) {
-            val openingMatches = matches.filter { it.branch == "WINNERS" && it.roundNumber == 1 }
-            val occupiedSeeds = activeParticipants.map { it.seed }.toSet()
-            val promotionSeed = (1..(openingMatches.size * 2)).firstOrNull { seed ->
-                if (seed in occupiedSeeds) return@firstOrNull false
-                val target = openingMatches.firstOrNull { it.matchKey == "W1_${(seed - 1) / 2}" } ?: return@firstOrNull false
-                val slotPlayer = if ((seed - 1) % 2 == 0) target.player1Id else target.player2Id
-                slotPlayer == null && target.winnerId == null && target.selectedWinnerId == null &&
-                    !target.byeConfirmed && target.status != "IN_PROGRESS"
+            val queuedIds = queued.map { it.playerId }.toSet()
+            // Keep promotion available when winners are full but a safe opening seat
+            // is still free in the losers branch.
+            val hasFreeOpeningSlot = listOf("WINNERS", "LOSERS").any { branch ->
+                matches.filter { it.branch == branch && it.roundNumber == 1 }.any { match ->
+                    val firstAvailable = match.player1Id == null &&
+                        (!match.manualPlayer1Locked ||
+                            (match.manualPlayer1Id != null && match.manualPlayer1Id in queuedIds))
+                    val secondAvailable = match.player2Id == null &&
+                        (!match.manualPlayer2Locked ||
+                            (match.manualPlayer2Id != null && match.manualPlayer2Id in queuedIds))
+                    (firstAvailable || secondAvailable) && match.winnerId == null &&
+                        match.selectedWinnerId == null && !match.byeConfirmed && match.status != "IN_PROGRESS"
+                }
             }
-            val canPromote = tournament.status == TournamentEntity.STATUS_ACTIVE && promotionSeed != null
+            val canPromote = tournament.status == TournamentEntity.STATUS_ACTIVE && hasFreeOpeningSlot
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("ČEKACÍ FRONTA", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
@@ -748,8 +780,8 @@ private fun TournamentDetailScreen(
                         Text("Zařadit dalšího do volného pole")
                     }
                     Text(
-                        if (canPromote) "Další čekající bude zařazen bez změny dosavadních výsledků."
-                        else "Čekající hráče lze zařadit, až bude v bracketu bezpečně volné místo.",
+                        if (canPromote) "Nejdřív se využije volné místo ve vítězné větvi; pokud není, hráč se zařadí do poraženecké. Odehrané výsledky zůstanou zachovány."
+                        else "V obou úvodních větvích teď není volná neodehraná pozice.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1246,10 +1278,10 @@ private fun WaitlistDialog(
     val selected = availablePlayers.firstOrNull { it.id == selectedId }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Přidat do čekací fronty") },
+        title = { Text("Přidat hráče do turnaje") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Vyber existujícího hráče, nebo zadej nového.")
+                Text("Vyber existujícího hráče, nebo zadej nového. Pokud je volné místo ve vítězné větvi, dostane ho přednostně; jinak se zkusí poraženecká větev. Když jsou obě plné, hráč zůstane ve čekací frontě.")
                 Box {
                     OutlinedButton(onClick = { showPlayers = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(selected?.name ?: "Vybrat existujícího hráče")
@@ -1278,7 +1310,7 @@ private fun WaitlistDialog(
             Button(
                 onClick = { if (newName.isNotBlank()) onAddNew(newName.trim()) else selectedId?.let(onAddExisting) },
                 enabled = newName.isNotBlank() || selectedId != null
-            ) { Text("Přidat do fronty") }
+            ) { Text("Přidat hráče") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
     )
@@ -1438,6 +1470,87 @@ private fun ClanPointsDialog(
                     onClick = { parsedAmount?.let { onSubmit(-it, reason) } }
                 ) { Text("− Odebrat") }
             }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
+    )
+}
+
+
+@Composable
+private fun PublicPublishDialog(
+    initialUrl: String,
+    initialKey: String,
+    initialEmail: String,
+    isBusy: Boolean,
+    onDismiss: () -> Unit,
+    onPublish: (String, String, String, String) -> Unit
+) {
+    var projectUrl by remember { mutableStateOf(initialUrl) }
+    var publishableKey by remember { mutableStateOf(initialKey) }
+    var email by remember { mutableStateOf(initialEmail) }
+    var password by remember { mutableStateOf("") }
+    val canPublish = projectUrl.startsWith("https://") &&
+        publishableKey.isNotBlank() && email.isNotBlank() && password.isNotBlank() && !isBusy
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Zveřejnit na web") },
+        text = {
+            Column(
+                Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    "Web je veřejný. Tato akce zveřejní jména hráčů, klany, ELO, turnaje, účastníky a výsledky zápasů.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Nezveřejňují se interní poznámky turnajů ani důvody ručních úprav bodů. Telefon zůstává hlavním úložištěm dat.",
+                    color = MaterialTheme.colorScheme.secondary,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                OutlinedTextField(
+                    value = projectUrl,
+                    onValueChange = { projectUrl = it.trim() },
+                    label = { Text("Supabase Project URL") },
+                    placeholder = { Text("https://projekt.supabase.co") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = publishableKey,
+                    onValueChange = { publishableKey = it.trim() },
+                    label = { Text("Veřejný publishable / anon klíč") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("E-mail správce") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Heslo správce") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "Heslo se neukládá. Přihlašovací token se používá pouze pro toto zveřejnění. Nikdy nevkládej service-role ani secret key.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = canPublish,
+                onClick = { onPublish(projectUrl, publishableKey, email, password) }
+            ) { Text(if (isBusy) "Nahrávám…" else "Publikovat data") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
     )

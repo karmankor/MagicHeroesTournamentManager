@@ -1,0 +1,8 @@
+{
+  "name": "magic-heroes-public-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check app.js && node --check config.js"
+  }
+}

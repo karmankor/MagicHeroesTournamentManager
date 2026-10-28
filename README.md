@@ -19,7 +19,11 @@ Nativní aplikace pro Android v Kotlinu, Jetpack Compose a Room. Data zůstávaj
 
 ## Pravidla bracketu
 
-Implementovaným výchozím modelem je **double elimination** (hráč vypadne po druhé prohře) pro 2–32 hráčů. Velikost pavouka se vybere podle počtu účastníků: malý pro 2–8 hráčů (8 míst), střední pro 9–16 hráčů (16 míst) a velký pro 17–32 hráčů (32 míst). Celá kapacita je připravená od začátku, včetně volných úvodních pozic pro pozdější hráče. Účastníci se párují podle pořadí ve výběru: první s druhým, třetí se čtvrtým atd. Návazné zápasy jsou definované dopředu. Vítěz pokračuje vítěznou větví, poražený přechází do odpovídající pozice poraženecké větve. Druhá prohra v poraženecké větvi už dál nenavazuje.
+Aplikace používá vlastní **systém opakovaných šancí** pro 2–32 hráčů; nejde o klasický double elimination, ve kterém druhá prohra hráče automaticky vyřadí. Kapacita se vybere podle počtu účastníků: malý pavouk pro 2–8 hráčů (15 zápasů včetně finále), střední pro 9–16 hráčů (31 zápasů) a velký pro 17–32 hráčů (63 zápasů). Celá kapacita je připravená od začátku, včetně volných úvodních pozic. Účastníci se párují podle pořadí ve výběru: první s druhým, třetí se čtvrtým atd. Návaznost vítězů je předem definovaná, ale poražený se znovu zařazuje dynamicky do úvodní části větve podle dostupných míst.
+
+Každá kapacita používá stejný počet kol ve vítězné a poraženecké větvi: malá 4–2–1, střední 8–4–2–1 a velká 16–8–4–2–1 zápasů po kolech. V každém jednotlivém kole tedy obě větve mají shodný počet zápasů.
+
+Vítěz postupuje o jedno kolo v téže větvi. Pokud už v následujícím kole čeká soupeř v jiném zápase, přednostně se připojí k tomuto soupeři namísto otevření dalšího prázdného zápasu. Pokud v kole nikdo nečeká, upřednostní se původně plánovaný zápas a poté jiné dostupné volné místo. Vítězové posledního kola postupují do správného slotu finále. Poražený ze **vítězné větve** nejprve hledá volné místo v 1. kole vítězné větve; teprve pokud tam místo není, použije 1. kolo poraženecké větve. Poražený ze **poraženecké větve** nejprve hledá volné místo v 1. kole poraženecké větve a pak ve vítězné větvi. V preferované větvi má přednost zápas, ve kterém už jeden hráč čeká na soupeře, před zcela prázdným zápasem. Ručně uzamčené pozice mají přednost před automatickým umístěním.
 
 Odstoupení hráče ponechá jeho seed jako volné místo; dokončené zápasy zůstanou v historii a odstoupivší hráč už nebude postupovat do dalších kol.
 
@@ -75,8 +79,6 @@ MagicHeroesTournamentManager/
 └── settings.gradle.kts
 ```
 
-## Důležitá poznámka k ověření
+## Testování
 
-Samostatný Kotlin smoke test plánovače bracketu prošel pro všechny počty 2–32 hráčů: ověřil acykličnost grafu a existenci cílů návazností; pro 8 hráčů vytvořil 14 zápasových uzlů a pro 32 hráčů 62. Kód prošel i základní kontrolou syntaktické struktury Kotlinu. To ale nenahrazuje sestavení Android aplikace.
-
-Tato pracovní relace nemá nakonfigurované Android SDK a nedokáže stáhnout Gradle ani Maven/Google Maven závislosti kvůli blokovanému síťovému DNS. Proto zde nebylo možné vytvořit ani ověřit výsledný APK a nešlo spustit Gradle test suite. První skutečné sestavení musí proběhnout v Android Studiu na počítači s nainstalovaným SDK a přístupem k repozitářům. Pokud Gradle vypíše chybu, zkopíruj sem celý první blok chyby; podle něj půjde projekt opravit.
+Jednotkové testy ověřují velikost a acykličnost připraveného pavouka: 15, 31 a 63 zápasových uzlů pro malou, střední a velkou kapacitu. Instrumentační testy v `app/src/androidTest` ověřují chování databáze při zapisování výsledků, pozdním příchodu hráčů a dynamickém přiřazování poražených. GitHub Actions spouští jednotkové testy i instrumentační testy na Android emulátoru a sestavuje debug APK.
