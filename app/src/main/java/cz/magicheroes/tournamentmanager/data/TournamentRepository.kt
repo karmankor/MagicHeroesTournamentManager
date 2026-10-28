@@ -366,14 +366,23 @@ class TournamentRepository(private val database: AppDatabase) {
         }
 
         val now = System.currentTimeMillis()
+        val selectedNameSnapshot = playerId?.let { id ->
+            dao.getParticipants(tournamentId).firstOrNull { it.playerId == id }?.playerNameSnapshot
+        }
         val updatedTarget = if (slot == 0) {
             target.copy(
+                // Update the live slot as well as its manual pin. Safe history-preserving
+                // rebuilds deliberately do not reconstruct the whole bracket from pins.
+                player1Id = if (locked) playerId else target.player1Id,
+                player1NameSnapshot = if (locked) selectedNameSnapshot else target.player1NameSnapshot,
                 manualPlayer1Locked = locked,
                 manualPlayer1Id = playerId.takeIf { locked },
                 manualPlayer1AssignedAt = now.takeIf { locked }
             )
         } else {
             target.copy(
+                player2Id = if (locked) playerId else target.player2Id,
+                player2NameSnapshot = if (locked) selectedNameSnapshot else target.player2NameSnapshot,
                 manualPlayer2Locked = locked,
                 manualPlayer2Id = playerId.takeIf { locked },
                 manualPlayer2AssignedAt = now.takeIf { locked }
